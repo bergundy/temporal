@@ -71,8 +71,9 @@ type (
 		scheduler    queues.Scheduler
 		rescheduler  queues.Rescheduler
 
-		lastPollTime time.Time
-		backoffTimer *time.Timer
+		lastPollTime    time.Time
+		backoffTimer    *time.Timer
+		readTaskRetrier backoff.Retrier
 
 		notifyCh   chan struct{}
 		status     int32
@@ -82,7 +83,7 @@ type (
 )
 
 var (
-	loadQueueTaskThrottleRetryDelay = 5 * time.Second
+	loadQueueTaskThrottleRetryDelay = 3 * time.Second
 )
 
 func newQueueProcessorBase(
@@ -113,8 +114,12 @@ func newQueueProcessorBase(
 		metricsScope: metricsScope,
 		ackMgr:       queueAckMgr,
 		lastPollTime: time.Time{},
-		scheduler:    scheduler,
-		rescheduler:  rescheduler,
+		readTaskRetrier: backoff.NewRetrier(
+			common.CreateReadTaskRetryPolicy(),
+			backoff.SystemClock,
+		),
+		scheduler:   scheduler,
+		rescheduler: rescheduler,
 	}
 
 	return p
@@ -233,12 +238,16 @@ func (p *queueProcessorBase) processBatch() {
 
 	p.lastPollTime = p.timeSource.Now()
 	tasks, more, err := p.ackMgr.readQueueTasks()
-
 	if err != nil {
-		p.logger.Warn("Processor unable to retrieve tasks", tag.Error(err))
-		p.notifyNewTask() // re-enqueue the event
+		p.logger.Error("Processor unable to retrieve tasks", tag.Error(err))
+		if common.IsResourceExhausted(err) {
+			p.throttle(loadQueueTaskThrottleRetryDelay)
+		} else {
+			p.throttle(p.readTaskRetrier.NextBackOff())
+		}
 		return
 	}
+	p.readTaskRetrier.Reset()
 
 	if len(tasks) == 0 {
 		return
