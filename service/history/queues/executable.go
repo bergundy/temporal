@@ -49,8 +49,11 @@ import (
 
 type (
 	Executable interface {
-		ctasks.PriorityTask
+		ctasks.Task
 		tasks.Task
+
+		GetPriority() ctasks.Priority
+		SetPriority(ctasks.Priority)
 
 		Attempt() int
 		Logger() log.Logger

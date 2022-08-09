@@ -39,7 +39,6 @@ import (
 	"go.temporal.io/server/common/quotas"
 	"go.temporal.io/server/common/resource"
 	"go.temporal.io/server/common/sdk"
-	ctasks "go.temporal.io/server/common/tasks"
 	"go.temporal.io/server/service/history/configs"
 	"go.temporal.io/server/service/history/queues"
 	"go.temporal.io/server/service/history/shard"
@@ -163,25 +162,20 @@ func NewTransferQueueProcessorFactory(
 ) queues.ProcessorFactory {
 	var scheduler queues.Scheduler
 	if params.Config.TransferProcessorEnablePriorityTaskScheduler() {
-		scheduler = queues.NewScheduler(
+		scheduler = queues.NewNamespacePriorityScheduler(
 			queues.NewPriorityAssigner(
 				params.ClusterMetadata.GetCurrentClusterName(),
 				params.NamespaceRegistry,
 				queues.PriorityAssignerOptions{
-					HighPriorityRPS:       params.Config.TransferTaskHighPriorityRPS,
 					CriticalRetryAttempts: params.Config.TransferTaskMaxRetryCount,
 				},
 				params.MetricsHandler,
 			),
-			queues.SchedulerOptions{
-				ParallelProcessorOptions: ctasks.ParallelProcessorOptions{
-					WorkerCount: params.Config.TransferProcessorSchedulerWorkerCount,
-					QueueSize:   params.Config.TransferProcessorSchedulerQueueSize(),
-				},
-				InterleavedWeightedRoundRobinSchedulerOptions: ctasks.InterleavedWeightedRoundRobinSchedulerOptions{
-					PriorityToWeight: configs.ConvertDynamicConfigValueToWeights(params.Config.TransferProcessorSchedulerRoundRobinWeights(), params.Logger),
-				},
+			queues.NamespacePrioritySchedulerOptions{
+				WorkerCount:      params.Config.TimerProcessorSchedulerWorkerCount,
+				NamespaceWeights: params.Config.TimerProcessorSchedulerRoundRobinWeights,
 			},
+			params.NamespaceRegistry,
 			params.MetricsHandler,
 			params.Logger,
 		)
@@ -222,25 +216,20 @@ func NewTimerQueueProcessorFactory(
 ) queues.ProcessorFactory {
 	var scheduler queues.Scheduler
 	if params.Config.TimerProcessorEnablePriorityTaskScheduler() {
-		scheduler = queues.NewScheduler(
+		scheduler = queues.NewNamespacePriorityScheduler(
 			queues.NewPriorityAssigner(
 				params.ClusterMetadata.GetCurrentClusterName(),
 				params.NamespaceRegistry,
 				queues.PriorityAssignerOptions{
-					HighPriorityRPS:       params.Config.TimerTaskHighPriorityRPS,
 					CriticalRetryAttempts: params.Config.TimerTaskMaxRetryCount,
 				},
 				params.MetricsHandler,
 			),
-			queues.SchedulerOptions{
-				ParallelProcessorOptions: ctasks.ParallelProcessorOptions{
-					WorkerCount: params.Config.TimerProcessorSchedulerWorkerCount,
-					QueueSize:   params.Config.TimerProcessorSchedulerQueueSize(),
-				},
-				InterleavedWeightedRoundRobinSchedulerOptions: ctasks.InterleavedWeightedRoundRobinSchedulerOptions{
-					PriorityToWeight: configs.ConvertDynamicConfigValueToWeights(params.Config.TimerProcessorSchedulerRoundRobinWeights(), params.Logger),
-				},
+			queues.NamespacePrioritySchedulerOptions{
+				WorkerCount:      params.Config.TransferProcessorSchedulerWorkerCount,
+				NamespaceWeights: params.Config.TransferProcessorSchedulerRoundRobinWeights,
 			},
+			params.NamespaceRegistry,
 			params.MetricsHandler,
 			params.Logger,
 		)
@@ -279,25 +268,20 @@ func NewVisibilityQueueProcessorFactory(
 ) queues.ProcessorFactory {
 	var scheduler queues.Scheduler
 	if params.Config.VisibilityProcessorEnablePriorityTaskScheduler() {
-		scheduler = queues.NewScheduler(
+		scheduler = queues.NewNamespacePriorityScheduler(
 			queues.NewPriorityAssigner(
 				params.ClusterMetadata.GetCurrentClusterName(),
 				params.NamespaceRegistry,
 				queues.PriorityAssignerOptions{
-					HighPriorityRPS:       params.Config.VisibilityTaskHighPriorityRPS,
 					CriticalRetryAttempts: params.Config.VisibilityTaskMaxRetryCount,
 				},
 				params.MetricsHandler,
 			),
-			queues.SchedulerOptions{
-				ParallelProcessorOptions: ctasks.ParallelProcessorOptions{
-					WorkerCount: params.Config.VisibilityProcessorSchedulerWorkerCount,
-					QueueSize:   params.Config.VisibilityProcessorSchedulerQueueSize(),
-				},
-				InterleavedWeightedRoundRobinSchedulerOptions: ctasks.InterleavedWeightedRoundRobinSchedulerOptions{
-					PriorityToWeight: configs.ConvertDynamicConfigValueToWeights(params.Config.VisibilityProcessorSchedulerRoundRobinWeights(), params.Logger),
-				},
+			queues.NamespacePrioritySchedulerOptions{
+				WorkerCount:      params.Config.VisibilityProcessorSchedulerWorkerCount,
+				NamespaceWeights: params.Config.VisibilityProcessorSchedulerRoundRobinWeights,
 			},
+			params.NamespaceRegistry,
 			params.MetricsHandler,
 			params.Logger,
 		)
