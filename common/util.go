@@ -92,7 +92,7 @@ const (
 	readTaskRetryExpirationInterval = backoff.NoInterval
 
 	retryTaskProcessingInitialInterval = 50 * time.Millisecond
-	retryTaskProcessingMaxAttempts     = 1
+	retryTaskProcessingMaxAttempts     = 2
 
 	rescheduleTaskRetryInitialInterval    = 3 * time.Second
 	rescheduleTaskRetryBackoffCoefficient = 1.05
