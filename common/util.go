@@ -94,8 +94,8 @@ const (
 	retryTaskProcessingInitialInterval = 50 * time.Millisecond
 	retryTaskProcessingMaxAttempts     = 2
 
-	rescheduleTaskRetryInitialInterval    = 3 * time.Second
-	rescheduleTaskRetryBackoffCoefficient = 1.05
+	rescheduleTaskRetryInitialInterval    = 1 * time.Second
+	rescheduleTaskRetryBackoffCoefficient = 1.1
 	rescheduleTaskRetryMaxInterval        = 3 * time.Minute
 
 	replicationServiceBusyInitialInterval    = 2 * time.Second

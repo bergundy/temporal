@@ -82,7 +82,7 @@ var (
 const (
 	// resubmitMaxAttempts is the max number of attempts we may skip rescheduler when a task is Nacked.
 	// check the comment in shouldResubmitOnNack() for more details
-	resubmitMaxAttempts = 20
+	resubmitMaxAttempts = 10
 )
 
 type (
@@ -235,7 +235,7 @@ func (e *executableImpl) HandleErr(err error) (retErr error) {
 }
 
 func (e *executableImpl) IsRetryableError(err error) bool {
-	// this determines if the executable should be retried within one submission to scheduler
+	// this determines if the executable should be retried when hold the worker goroutine
 
 	if shard.IsShardOwnershipLostError(err) {
 		return false
@@ -346,9 +346,11 @@ func (e *executableImpl) shouldResubmitOnNack(attempt int, err error) bool {
 		return false
 	}
 
-	return err == consts.ErrWorkflowBusy ||
-		common.IsContextDeadlineExceededErr(err) ||
-		e.IsRetryableError(err)
+	if shard.IsShardOwnershipLostError(err) {
+		return false
+	}
+
+	return err != consts.ErrTaskRetry
 }
 
 func (e *executableImpl) rescheduleTime(attempt int) time.Time {
