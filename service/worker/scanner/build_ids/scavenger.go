@@ -206,12 +206,12 @@ func (a *Activities) processNamespaceEntry(
 			return err
 		}
 		for heartbeat.TaskQueueIdx < len(tqResponse.Entries) {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
 			entry := tqResponse.Entries[heartbeat.TaskQueueIdx]
 			if err := a.processUserDataEntry(ctx, rateLimiter, *heartbeat, ns, entry); err != nil {
-				// Intentionally don't fail the activity on single entry.
+				// Intentionally don't fail the activity on single entry unless the context is cancelled.
+				if ctx.Err() != nil {
+					return err
+				}
 				a.logger.Error("Failed to update task queue user data",
 					tag.WorkflowNamespace(ns.Name().String()),
 					tag.WorkflowTaskQueueName(entry.TaskQueue),
