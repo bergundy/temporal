@@ -312,6 +312,21 @@ func (c *temporalImpl) FrontendHTTPHostPort() (string, int) {
 	}
 }
 
+func (c *temporalImpl) NexusHTTPAddress() string {
+	host, port := c.NexusHTTPHostPort()
+	return net.JoinHostPort(host, strconv.Itoa(port))
+}
+
+func (c *temporalImpl) NexusHTTPHostPort() (string, int) {
+	if host, port, err := net.SplitHostPort(c.FrontendGRPCAddress()); err != nil {
+		panic(fmt.Errorf("Invalid gRPC frontend address: %w", err))
+	} else if portNum, err := strconv.Atoi(port); err != nil {
+		panic(fmt.Errorf("Invalid gRPC frontend port: %w", err))
+	} else {
+		return host, portNum + 20
+	}
+}
+
 func (c *temporalImpl) HistoryServiceAddress() []string {
 	var hosts []string
 	var startPort int

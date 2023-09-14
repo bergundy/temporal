@@ -2,6 +2,8 @@ module go.temporal.io/server
 
 go 1.21
 
+toolchain go1.21.1
+
 require (
 	cloud.google.com/go/storage v1.30.1
 	github.com/aws/aws-sdk-go v1.44.289
@@ -64,6 +66,8 @@ require (
 	modernc.org/sqlite v1.23.1
 )
 
+require github.com/gorilla/mux v1.8.0 // indirect
+
 require (
 	cloud.google.com/go v0.110.8 // indirect
 	cloud.google.com/go/compute v1.23.0 // indirect
@@ -101,6 +105,7 @@ require (
 	github.com/mattn/go-isatty v0.0.19 // indirect
 	github.com/mattn/go-runewidth v0.0.14 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
+	github.com/nexus-rpc/sdk-go v0.0.0-20230906182323-c6769ebc0c28
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
 	github.com/pkg/errors v0.9.1
 	github.com/pmezard/go-difflib v1.0.0 // indirect
