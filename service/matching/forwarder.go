@@ -205,6 +205,37 @@ func (fwdr *Forwarder) ForwardQueryTask(
 	return resp, fwdr.handleErr(err)
 }
 
+// ForwardQueryTask forwards a query task to parent task queue partition, if it exists
+func (fwdr *Forwarder) ForwardNexusTask(
+	ctx context.Context,
+	task *internalTask,
+) (*matchingservice.ProcessNexusTaskResponse, error) {
+
+	// TODO: delete this?
+	if fwdr.taskQueueKind == enumspb.TASK_QUEUE_KIND_STICKY {
+		return nil, errTaskQueueKind
+	}
+
+	degree := fwdr.cfg.ForwarderMaxChildrenPerNode()
+	target, err := fwdr.taskQueueID.Parent(degree)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := fwdr.client.ProcessNexusTask(ctx, &matchingservice.ProcessNexusTaskRequest{
+		NamespaceId: task.nexus.request.GetNamespaceId(),
+		TaskQueue: &taskqueuepb.TaskQueue{
+			Name: target.FullName(),
+			Kind: fwdr.taskQueueKind,
+		},
+		Request:          task.nexus.request.Request,
+		ForwardedSource:  fwdr.taskQueueID.FullName(),
+		VersionDirective: task.nexus.request.VersionDirective,
+	})
+
+	return resp, fwdr.handleErr(err)
+}
+
 // ForwardPoll forwards a poll request to parent task queue partition if it exist
 func (fwdr *Forwarder) ForwardPoll(ctx context.Context, pollMetadata *pollMetadata) (*internalTask, error) {
 	if fwdr.taskQueueKind == enumspb.TASK_QUEUE_KIND_STICKY {

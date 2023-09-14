@@ -95,6 +95,8 @@ var Module = fx.Options(
 	fx.Provide(NewVersionChecker),
 	fx.Provide(ServiceResolverProvider),
 	fx.Provide(HTTPAPIServerProvider),
+	fx.Provide(IncomingServiceRegistryProvider),
+	fx.Provide(NexusAPIServerProvider),
 	fx.Provide(NewServiceProvider),
 	fx.Invoke(ServiceLifetimeHooks),
 )
@@ -104,6 +106,7 @@ func NewServiceProvider(
 	server *grpc.Server,
 	healthServer *health.Server,
 	httpAPIServer *HTTPAPIServer,
+	nexusAPIServer *NexusAPIServer,
 	handler Handler,
 	adminHandler *AdminHandler,
 	operatorHandler *OperatorHandlerImpl,
@@ -120,6 +123,7 @@ func NewServiceProvider(
 		server,
 		healthServer,
 		httpAPIServer,
+		nexusAPIServer,
 		handler,
 		adminHandler,
 		operatorHandler,
@@ -545,6 +549,7 @@ func OperatorHandlerProvider(
 	clusterMetadataManager persistence.ClusterMetadataManager,
 	clusterMetadata cluster.Metadata,
 	clientFactory client.Factory,
+	incomingServiceRegistry persistence.IncomingServiceRegistry,
 ) *OperatorHandlerImpl {
 	args := NewOperatorHandlerImplArgs{
 		configuration,
@@ -560,6 +565,7 @@ func OperatorHandlerProvider(
 		clusterMetadataManager,
 		clusterMetadata,
 		clientFactory,
+		incomingServiceRegistry,
 	}
 	return NewOperatorHandlerImpl(args)
 }
@@ -647,6 +653,52 @@ func HTTPAPIServerProvider(
 		grpcServerOptions.UnaryInterceptors,
 		metricsHandler,
 		namespaceRegistry,
+		logger,
+	)
+}
+
+func IncomingServiceRegistryProvider(clusterMetadataManager persistence.ClusterMetadataManager) persistence.IncomingServiceRegistry {
+	return persistence.NewHackyWIPIncomingServiceRegistry(clusterMetadataManager)
+}
+
+// NexusAPIServerProvider provides an Nexus API server if port and registry are enabled or nil otherwise.
+func NexusAPIServerProvider(
+	cfg *config.Config,
+	serviceName primitives.ServiceName,
+	serviceConfig *Config,
+	grpcListener net.Listener,
+	tlsConfigProvider encryption.TLSConfigProvider,
+	grpcServerOptions GrpcServerOptions,
+	metricsHandler metrics.Handler,
+	logger log.Logger,
+	namespaceRegistry namespace.Registry,
+	serviceRegistry persistence.IncomingServiceRegistry,
+	matchingClient resource.MatchingClient,
+	historyClient resource.HistoryClient,
+) (*NexusAPIServer, error) {
+	if serviceRegistry == nil {
+		return nil, nil
+	}
+	// If the service is not the frontend service, Nexus API is disabled
+	if serviceName != primitives.FrontendService {
+		return nil, nil
+	}
+	// If Nexus API port is 0, it is disabled
+	rpcConfig := cfg.Services[string(serviceName)].RPC
+	if rpcConfig.NexusPort == 0 {
+		return nil, nil
+	}
+
+	return NewNexusAPIServer(
+		serviceConfig,
+		rpcConfig,
+		grpcListener,
+		tlsConfigProvider,
+		metricsHandler,
+		serviceRegistry,
+		namespaceRegistry,
+		matchingClient,
+		historyClient,
 		logger,
 	)
 }

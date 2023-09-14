@@ -135,6 +135,7 @@ type (
 		// DispatchQueryTask will dispatch query to local or remote poller. If forwarded then result or error is returned,
 		// if dispatched to local poller then nil and nil is returned.
 		DispatchQueryTask(ctx context.Context, taskID string, request *matchingservice.QueryWorkflowRequest) (*matchingservice.QueryWorkflowResponse, error)
+		DispatchNexusTask(ctx context.Context, taskID string, request *matchingservice.ProcessNexusTaskRequest) (*matchingservice.ProcessNexusTaskResponse, error)
 		// GetUserData returns the versioned user data for this task queue
 		GetUserData() (*persistencespb.VersionedTaskQueueUserData, chan struct{}, error)
 		// UpdateUserData updates user data for this task queue and replicates across clusters if necessary.
@@ -511,7 +512,6 @@ func (c *taskQueueManagerImpl) GetTask(
 	if err != nil {
 		return nil, err
 	}
-
 	task.namespace = c.namespace
 	task.backlogCountHint = c.taskAckManager.getBacklogCountHint
 	return task, nil
@@ -541,6 +541,17 @@ func (c *taskQueueManagerImpl) DispatchQueryTask(
 ) (*matchingservice.QueryWorkflowResponse, error) {
 	task := newInternalQueryTask(taskID, request)
 	return c.matcher.OfferQuery(ctx, task)
+}
+
+// DispatchNexusTask will dispatch nexus task to local or remote poller. If forwarded then result or error is returned,
+// if dispatched to local poller then nil and nil is returned.
+func (c *taskQueueManagerImpl) DispatchNexusTask(
+	ctx context.Context,
+	taskID string,
+	request *matchingservice.ProcessNexusTaskRequest,
+) (*matchingservice.ProcessNexusTaskResponse, error) {
+	task := newInternalNexusTask(taskID, request)
+	return c.matcher.OfferNexusTask(ctx, task)
 }
 
 // GetUserData returns the user data for the task queue if any.

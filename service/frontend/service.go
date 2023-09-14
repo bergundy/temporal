@@ -284,6 +284,7 @@ type Service struct {
 	visibilityManager manager.VisibilityManager
 	server            *grpc.Server
 	httpAPIServer     *HTTPAPIServer
+	nexusAPIServer    *NexusAPIServer
 
 	logger                         log.Logger
 	grpcListener                   net.Listener
@@ -297,6 +298,7 @@ func NewService(
 	server *grpc.Server,
 	healthServer *health.Server,
 	httpAPIServer *HTTPAPIServer,
+	nexusAPIServer *NexusAPIServer,
 	handler Handler,
 	adminHandler *AdminHandler,
 	operatorHandler *OperatorHandlerImpl,
@@ -313,6 +315,7 @@ func NewService(
 		server:                         server,
 		healthServer:                   healthServer,
 		httpAPIServer:                  httpAPIServer,
+		nexusAPIServer:                 nexusAPIServer,
 		handler:                        handler,
 		adminHandler:                   adminHandler,
 		operatorHandler:                operatorHandler,
@@ -357,6 +360,14 @@ func (s *Service) Start() {
 		go func() {
 			if err := s.httpAPIServer.Serve(); err != nil {
 				s.logger.Fatal("Failed to serve HTTP API server", tag.Error(err))
+			}
+		}()
+	}
+
+	if s.nexusAPIServer != nil {
+		go func() {
+			if err := s.nexusAPIServer.Serve(); err != nil {
+				s.logger.Fatal("Failed to serve Nexus API server", tag.Error(err))
 			}
 		}()
 	}
@@ -406,6 +417,13 @@ func (s *Service) Stop() {
 		go func() {
 			defer wg.Done()
 			s.httpAPIServer.GracefulStop(requestDrainTime)
+		}()
+	}
+	if s.nexusAPIServer != nil {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			s.nexusAPIServer.GracefulStop(requestDrainTime)
 		}()
 	}
 	wg.Wait()

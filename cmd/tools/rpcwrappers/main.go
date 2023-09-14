@@ -240,6 +240,9 @@ func makeGetMatchingClient(reqType reflect.Type) string {
 		"ApplyTaskQueueUserDataReplicationEventRequest":
 		tq = findOneNestedField(t, "TaskQueue", "request", 2)
 		tqt = fieldWithPath{path: "enumspb.TASK_QUEUE_TYPE_WORKFLOW"}
+	case "ProcessNexusTaskRequest", "PollNexusTaskQueueRequest", "RespondNexusTaskCompletedRequest":
+		tq = findOneNestedField(t, "TaskQueue", "request", 2)
+		tqt = fieldWithPath{path: "enumspb.TASK_QUEUE_TYPE_NEXUS"}
 	default:
 		tq = findOneNestedField(t, "TaskQueue", "request", 2)
 		tqt = findOneNestedField(t, "TaskQueueType", "request", 2)

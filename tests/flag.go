@@ -30,6 +30,7 @@ import "flag"
 var TestFlags struct {
 	FrontendAddr                  string
 	FrontendHTTPAddr              string
+	NexusHTTPAddr                 string
 	PersistenceType               string
 	PersistenceDriver             string
 	TestClusterConfigFile         string
@@ -39,6 +40,7 @@ var TestFlags struct {
 func init() {
 	flag.StringVar(&TestFlags.FrontendAddr, "frontendAddress", "", "host:port for temporal frontend service")
 	flag.StringVar(&TestFlags.FrontendHTTPAddr, "frontendHttpAddress", "", "host:port for temporal frontend HTTP service (only applies when frontendAddress set)")
+	flag.StringVar(&TestFlags.NexusHTTPAddr, "nexusHttpAddress", "", "host:port for temporal frontend Nexus HTTP service (only applies when frontendAddress set)")
 	flag.StringVar(&TestFlags.PersistenceType, "persistenceType", "sql", "type of persistence - [nosql or sql]")
 	flag.StringVar(&TestFlags.PersistenceDriver, "persistenceDriver", "sqlite", "driver of nosql / sql- [cassandra, mysql, postgresql, sqlite]")
 	flag.StringVar(&TestFlags.TestClusterConfigFile, "TestClusterConfigFile", "", "test cluster config file location")

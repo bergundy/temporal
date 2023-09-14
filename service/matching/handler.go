@@ -30,6 +30,7 @@ import (
 	"time"
 
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
+	"go.temporal.io/api/workflowservice/v1"
 
 	"go.temporal.io/server/api/matchingservice/v1"
 	"go.temporal.io/server/common"
@@ -55,6 +56,28 @@ type (
 		namespaceRegistry namespace.Registry
 	}
 )
+
+// PollNexusTaskQueue implements matchingservice.MatchingServiceServer.
+func (h *Handler) PollNexusTaskQueue(ctx context.Context, request *matchingservice.PollNexusTaskQueueRequest) (*matchingservice.PollNexusTaskQueueResponse, error) {
+	res, err := h.engine.PollNexusTaskQueue(ctx, request, h.metricsHandler)
+	if err != nil {
+		return nil, err
+	}
+	if res == nil {
+		return &matchingservice.PollNexusTaskQueueResponse{Response: &workflowservice.PollNexusTaskQueueResponse{}}, nil
+	}
+	return res, nil
+}
+
+// ProcessNexusTask implements matchingservice.MatchingServiceServer.
+func (h *Handler) ProcessNexusTask(ctx context.Context, request *matchingservice.ProcessNexusTaskRequest) (*matchingservice.ProcessNexusTaskResponse, error) {
+	return h.engine.ProcessNexusTask(ctx, request, h.metricsHandler)
+}
+
+// RespondNexusTaskCompleted implements matchingservice.MatchingServiceServer.
+func (h *Handler) RespondNexusTaskCompleted(ctx context.Context, request *matchingservice.RespondNexusTaskCompletedRequest) (*matchingservice.RespondNexusTaskCompletedResponse, error) {
+	return h.engine.RespondNexusTaskCompleted(ctx, request, h.metricsHandler)
+}
 
 const (
 	serviceName = "temporal.api.workflowservice.v1.MatchingService"

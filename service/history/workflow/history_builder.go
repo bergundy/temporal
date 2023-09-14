@@ -27,17 +27,20 @@ package workflow
 import (
 	"time"
 
+	"github.com/pborman/uuid"
 	commandpb "go.temporal.io/api/command/v1"
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	failurepb "go.temporal.io/api/failure/v1"
 	historypb "go.temporal.io/api/history/v1"
+	nexuspb "go.temporal.io/api/nexus/v1"
 	sdkpb "go.temporal.io/api/sdk/v1"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	updatepb "go.temporal.io/api/update/v1"
 	workflowpb "go.temporal.io/api/workflow/v1"
 
 	"go.temporal.io/server/api/historyservice/v1"
+	persistencespb "go.temporal.io/server/api/persistence/v1"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/common/metrics"
@@ -200,6 +203,7 @@ func (b *HistoryBuilder) AddWorkflowExecutionStartedEvent(
 		SearchAttributes:                req.SearchAttributes,
 		WorkflowId:                      req.WorkflowId,
 		SourceVersionStamp:              request.SourceVersionStamp,
+		CallbackUrl:                     req.CallbackUrl,
 	}
 	parentInfo := request.ParentExecutionInfo
 	if parentInfo != nil {
@@ -351,6 +355,63 @@ func (b *HistoryBuilder) AddActivityTaskScheduledEvent(
 			HeartbeatTimeout:             command.HeartbeatTimeout,
 			RetryPolicy:                  command.RetryPolicy,
 			UseCompatibleVersion:         command.UseCompatibleVersion,
+		},
+	}
+
+	event, _ = b.appendEvents(event)
+	return event
+}
+
+// TODO: move me
+func (b *HistoryBuilder) AddNexusOperationScheduledEvent(
+	workflowTaskCompletedEventID int64,
+	command *commandpb.ScheduleNexusOperationCommandAttributes,
+) *historypb.HistoryEvent {
+	event := b.createNewHistoryEvent(enumspb.EVENT_TYPE_NEXUS_OPERATION_SCHEDULED, b.timeSource.Now())
+	event.Attributes = &historypb.HistoryEvent_NexusOperationScheduledEventAttributes{
+		NexusOperationScheduledEventAttributes: &historypb.NexusOperationScheduledEventAttributes{
+			WorkflowTaskCompletedEventId: workflowTaskCompletedEventID,
+			Service:                      command.Service,
+			Operation:                    command.Operation,
+			Input:                        command.GetInput(),
+			Timeout:                      command.GetTimeout(),
+			Headers:                      command.GetHeaders(),
+			RequestId:                    uuid.New(),
+		},
+	}
+
+	event, _ = b.appendEvents(event)
+	return event
+}
+
+// TODO: move me
+func (b *HistoryBuilder) AddNexusOperationStartedEvent(
+	state *persistencespb.NexusOperationState,
+	operationID string,
+) *historypb.HistoryEvent {
+	event := b.createNewHistoryEvent(enumspb.EVENT_TYPE_NEXUS_OPERATION_STARTED, b.timeSource.Now())
+	event.Attributes = &historypb.HistoryEvent_NexusOperationStartedEventAttributes{
+		NexusOperationStartedEventAttributes: &historypb.NexusOperationStartedEventAttributes{
+			ScheduledEventId: state.ScheduledEventId,
+			OperationId:      operationID,
+		},
+	}
+
+	event, _ = b.appendEvents(event)
+	return event
+}
+
+func (b *HistoryBuilder) AddNexusOperationCompletedEvent(
+	state *persistencespb.NexusOperationState,
+	result *nexuspb.Payload,
+	startedEventID int64, // TODO: do we care?
+) *historypb.HistoryEvent {
+	event := b.createNewHistoryEvent(enumspb.EVENT_TYPE_NEXUS_OPERATION_COMPLETED, b.timeSource.Now())
+	event.Attributes = &historypb.HistoryEvent_NexusOperationCompletedEventAttributes{
+		NexusOperationCompletedEventAttributes: &historypb.NexusOperationCompletedEventAttributes{
+			ScheduledEventId: state.ScheduledEventId,
+			StartedEventId:   startedEventID,
+			Result:           result,
 		},
 	}
 
@@ -1413,6 +1474,11 @@ func (b *HistoryBuilder) bufferEvent(
 		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_UPDATE_ACCEPTED,
 		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_UPDATE_COMPLETED:
 		// do not buffer event if event is directly generated from a message
+		return false
+
+	case // nexus command events should not be buffered
+		enumspb.EVENT_TYPE_NEXUS_OPERATION_SCHEDULED,
+		enumspb.EVENT_TYPE_NEXUS_OPERATION_CANCEL_REQUESTED:
 		return false
 
 	default:

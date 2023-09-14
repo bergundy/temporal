@@ -200,6 +200,21 @@ func (c *retryableClient) PollActivityTaskQueue(
 	return resp, err
 }
 
+func (c *retryableClient) PollNexusTaskQueue(
+	ctx context.Context,
+	request *matchingservice.PollNexusTaskQueueRequest,
+	opts ...grpc.CallOption,
+) (*matchingservice.PollNexusTaskQueueResponse, error) {
+	var resp *matchingservice.PollNexusTaskQueueResponse
+	op := func(ctx context.Context) error {
+		var err error
+		resp, err = c.client.PollNexusTaskQueue(ctx, request, opts...)
+		return err
+	}
+	err := backoff.ThrottleRetryContext(ctx, op, c.policy, c.isRetryable)
+	return resp, err
+}
+
 func (c *retryableClient) PollWorkflowTaskQueue(
 	ctx context.Context,
 	request *matchingservice.PollWorkflowTaskQueueRequest,
@@ -209,6 +224,21 @@ func (c *retryableClient) PollWorkflowTaskQueue(
 	op := func(ctx context.Context) error {
 		var err error
 		resp, err = c.client.PollWorkflowTaskQueue(ctx, request, opts...)
+		return err
+	}
+	err := backoff.ThrottleRetryContext(ctx, op, c.policy, c.isRetryable)
+	return resp, err
+}
+
+func (c *retryableClient) ProcessNexusTask(
+	ctx context.Context,
+	request *matchingservice.ProcessNexusTaskRequest,
+	opts ...grpc.CallOption,
+) (*matchingservice.ProcessNexusTaskResponse, error) {
+	var resp *matchingservice.ProcessNexusTaskResponse
+	op := func(ctx context.Context) error {
+		var err error
+		resp, err = c.client.ProcessNexusTask(ctx, request, opts...)
 		return err
 	}
 	err := backoff.ThrottleRetryContext(ctx, op, c.policy, c.isRetryable)
@@ -239,6 +269,21 @@ func (c *retryableClient) ReplicateTaskQueueUserData(
 	op := func(ctx context.Context) error {
 		var err error
 		resp, err = c.client.ReplicateTaskQueueUserData(ctx, request, opts...)
+		return err
+	}
+	err := backoff.ThrottleRetryContext(ctx, op, c.policy, c.isRetryable)
+	return resp, err
+}
+
+func (c *retryableClient) RespondNexusTaskCompleted(
+	ctx context.Context,
+	request *matchingservice.RespondNexusTaskCompletedRequest,
+	opts ...grpc.CallOption,
+) (*matchingservice.RespondNexusTaskCompletedResponse, error) {
+	var resp *matchingservice.RespondNexusTaskCompletedResponse
+	op := func(ctx context.Context) error {
+		var err error
+		resp, err = c.client.RespondNexusTaskCompleted(ctx, request, opts...)
 		return err
 	}
 	err := backoff.ThrottleRetryContext(ctx, op, c.policy, c.isRetryable)

@@ -32,6 +32,7 @@ import "temporal/api/common/v1/message.proto";
 import "temporal/api/history/v1/message.proto";
 import "temporal/api/taskqueue/v1/message.proto";
 import "temporal/api/enums/v1/workflow.proto";
+import "temporal/api/nexus/v1/message.proto";
 import "temporal/api/workflow/v1/message.proto";
 import "temporal/api/query/v1/message.proto";
 import "temporal/api/protocol/v1/message.proto";
@@ -671,6 +672,16 @@ message UpdateWorkflowExecutionResponse {
     temporal.api.workflowservice.v1.UpdateWorkflowExecutionResponse response = 1;
 }
 
+message CompleteNexusOperationRequest {
+    string namespace_id = 1;
+    string workflow_id = 2;
+    string run_id = 3;
+    int64 scheduled_event_id = 4;
+    temporal.api.nexus.v1.Payload payload = 5;
+}
+
+message CompleteNexusOperationResponse {}
+
 message StreamWorkflowReplicationMessagesRequest {
     oneof attributes {
         temporal.server.api.replication.v1.SyncReplicationState sync_replication_state = 1;
@@ -690,4 +701,84 @@ message PollWorkflowExecutionUpdateRequest {
 
 message PollWorkflowExecutionUpdateResponse {
     temporal.api.workflowservice.v1.PollWorkflowExecutionUpdateResponse response = 1;
+}
+
+message GetWorkflowExecutionHistoryRequest {
+    string namespace_id = 1;
+    temporal.api.workflowservice.v1.GetWorkflowExecutionHistoryRequest request = 2;
+}
+
+message GetWorkflowExecutionHistoryResponse {
+    temporal.api.workflowservice.v1.GetWorkflowExecutionHistoryResponse response = 1;
+}
+
+message GetWorkflowExecutionHistoryReverseRequest {
+    string namespace_id = 1;
+    temporal.api.workflowservice.v1.GetWorkflowExecutionHistoryReverseRequest request = 2;
+}
+
+message GetWorkflowExecutionHistoryReverseResponse {
+    temporal.api.workflowservice.v1.GetWorkflowExecutionHistoryReverseResponse response = 1;
+}
+
+/**
+  * StartEventId defines the beginning of the event to fetch. The first event is exclusive.
+  * EndEventId and EndEventVersion defines the end of the event to fetch. The end event is exclusive.
+  **/
+message GetWorkflowExecutionRawHistoryV2Request {
+    string namespace_id = 1;
+    temporal.server.api.adminservice.v1.GetWorkflowExecutionRawHistoryV2Request request = 2;
+}
+
+message GetWorkflowExecutionRawHistoryV2Response {
+    temporal.server.api.adminservice.v1.GetWorkflowExecutionRawHistoryV2Response response = 1;
+}
+
+message ForceDeleteWorkflowExecutionRequest {
+    string namespace_id = 1;
+    temporal.server.api.adminservice.v1.DeleteWorkflowExecutionRequest request = 2;
+}
+
+message ForceDeleteWorkflowExecutionResponse {
+    temporal.server.api.adminservice.v1.DeleteWorkflowExecutionResponse response = 1;
+}
+
+message HistoryTask {
+    // shard_id is included to avoid having to deserialize the task blob.
+    int32 shard_id = 1;
+    temporal.api.common.v1.DataBlob task = 2;
+}
+
+message HistoryDLQTaskMetadata {
+    // message_id is the zero-indexed sequence number of the message in the queue that contains this history task.
+    int64 message_id = 1;
+}
+
+// HistoryDLQTask is a history task that has been moved to the DLQ, so it also has a message ID (index within that
+// queue).
+message HistoryDLQTask {
+    HistoryDLQTaskMetadata metadata = 1;
+    HistoryTask task = 2;
+}
+
+// HistoryDLQKey is a compound key that identifies a history DLQ.
+message HistoryDLQKey {
+    temporal.server.api.enums.v1.TaskCategory category = 1;
+    string source_cluster = 2;
+    string target_cluster = 3;
+}
+
+message GetDLQTasksRequest {
+    HistoryDLQKey dlq_key = 1;
+    // page_size must be positive. Up to this many tasks will be returned.
+    int32 page_size = 2;
+    bytes next_page_token = 3;
+}
+
+message GetDLQTasksResponse {
+    repeated HistoryDLQTask dlq_tasks = 1;
+    // next_page_token is empty if there are no more results. However, the converse is not true. If there are no more
+    // results, this field may still be non-empty. This is to avoid having to do a count query to determine whether
+    // there are more results.
+    bytes next_page_token = 2;
 }

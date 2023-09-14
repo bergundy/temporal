@@ -70,6 +70,7 @@ type (
 		adminClient            AdminClient
 		operatorClient         operatorservice.OperatorServiceClient
 		httpAPIAddress         string
+		nexusHTTPAddress       string
 		Logger                 log.Logger
 		namespace              string
 		foreignNamespace       string
@@ -98,6 +99,7 @@ func (s *FunctionalTestBase) setupSuite(defaultClusterConfigFile string) {
 		s.adminClient = NewAdminClient(connection)
 		s.operatorClient = operatorservice.NewOperatorServiceClient(connection)
 		s.httpAPIAddress = TestFlags.FrontendHTTPAddr
+		s.nexusHTTPAddress = TestFlags.NexusHTTPAddr
 	} else {
 		s.Logger.Info("Running functional test against test cluster")
 		cluster, err := NewCluster(clusterConfig, s.Logger)
@@ -107,9 +109,11 @@ func (s *FunctionalTestBase) setupSuite(defaultClusterConfigFile string) {
 		s.adminClient = s.testCluster.GetAdminClient()
 		s.operatorClient = s.testCluster.GetOperatorClient()
 		s.httpAPIAddress = cluster.host.FrontendHTTPAddress()
+		s.nexusHTTPAddress = cluster.host.NexusHTTPAddress()
 	}
 
 	s.namespace = s.randomizeStr("functional-test-namespace")
+	s.namespace = "default" // TODO
 	s.Require().NoError(s.registerNamespace(s.namespace, 24*time.Hour, enumspb.ARCHIVAL_STATE_DISABLED, "", enumspb.ARCHIVAL_STATE_DISABLED, ""))
 
 	s.foreignNamespace = s.randomizeStr("functional-foreign-test-namespace")

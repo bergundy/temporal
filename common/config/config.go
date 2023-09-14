@@ -98,6 +98,9 @@ type (
 		// HTTPPort is the port on which HTTP will listen. If unset/0, HTTP will be
 		// disabled. This setting only applies to the frontend service.
 		HTTPPort int `yaml:"httpPort"`
+		// NexusPort is the port on which frotend will listen for Nexus service requests. If unset/0, Nexus will be
+		// disabled. This setting only applies to the frontend service.
+		NexusPort int `yaml:"nexusPort"`
 		// HTTPAdditionalForwardedHeaders adds additional headers to the default set
 		// forwarded from HTTP to gRPC.
 		HTTPAdditionalForwardedHeaders []string `yaml:"httpAdditionalForwardedHeaders"`

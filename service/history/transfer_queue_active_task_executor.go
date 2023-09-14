@@ -25,13 +25,22 @@
 package history
 
 import (
+	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
+	"math/rand"
+	"net"
+	"net/http"
+	"net/url"
 
+	"github.com/nexus-rpc/sdk-go/nexus"
 	"github.com/pborman/uuid"
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	historypb "go.temporal.io/api/history/v1"
+	nexuspb "go.temporal.io/api/nexus/v1"
 	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	workflowpb "go.temporal.io/api/workflow/v1"
@@ -44,6 +53,7 @@ import (
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
+	"go.temporal.io/server/common/membership"
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/persistence"
@@ -74,8 +84,40 @@ type (
 
 		workflowResetter        ndc.WorkflowResetter
 		parentClosePolicyClient parentclosepolicy.Client
+		frontendResolver        membership.ServiceResolver
 	}
 )
+
+// TODO: move this out of here
+func (t *transferQueueActiveTaskExecutor) httpCaller(r *http.Request) (*http.Response, error) {
+	if err := rewriteLocalNexusURL(r.URL, t.frontendResolver); err != nil {
+		return nil, err
+	}
+	// TODO: use a different client
+	return http.DefaultClient.Do(r)
+}
+
+// TODO: move this out of here
+func rewriteLocalNexusURL(u *url.URL, frontendResolver membership.ServiceResolver) error {
+	if u.Hostname() != "localhost" {
+		return nil
+	}
+	// TODO: this is okay if the callback is local to the cluster, otherwise, we'll need some global resolution
+	members := frontendResolver.Members()
+	if len(members) == 0 {
+		return errors.New("no frontend service members")
+	}
+	idx := rand.Intn(len(members))
+	address := members[idx].GetAddress()
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return err
+	}
+
+	// TODO: get the configured port here
+	u.Host = fmt.Sprintf("%s:%d", host, 7253)
+	return nil
+}
 
 func newTransferQueueActiveTaskExecutor(
 	shard shard.Context,
@@ -88,6 +130,7 @@ func newTransferQueueActiveTaskExecutor(
 	historyRawClient resource.HistoryRawClient,
 	matchingRawClient resource.MatchingRawClient,
 	visibilityManager manager.VisibilityManager,
+	frontendResolver membership.ServiceResolver,
 ) queues.Executor {
 	return &transferQueueActiveTaskExecutor{
 		transferQueueTaskExecutorBase: newTransferQueueTaskExecutorBase(
@@ -111,6 +154,7 @@ func newTransferQueueActiveTaskExecutor(
 			sdkClientFactory,
 			config.NumParentClosePolicySystemWorkflows(),
 		),
+		frontendResolver: frontendResolver,
 	}
 }
 
@@ -156,6 +200,8 @@ func (t *transferQueueActiveTaskExecutor) Execute(
 		err = t.processResetWorkflow(ctx, task)
 	case *tasks.DeleteExecutionTask:
 		err = t.processDeleteExecutionTask(ctx, task)
+	case *tasks.NexusTask:
+		err = t.processNexusTask(ctx, task)
 	default:
 		err = errUnknownTransferTask
 	}
@@ -438,6 +484,209 @@ func (t *transferQueueActiveTaskExecutor) processCloseExecution(
 		)
 	}
 	return err
+}
+
+func (t *transferQueueActiveTaskExecutor) processNexusTask(
+	ctx context.Context,
+	task *tasks.NexusTask,
+) (retError error) {
+	ctx, cancel := context.WithTimeout(ctx, taskTimeout)
+	defer cancel()
+
+	if task.Callback != nil {
+		return t.processNexusCallbackTask(ctx, task)
+	}
+	if task.StartCall != nil {
+		return t.processNexusStartTask(ctx, task)
+	}
+	panic("unkown nexus task type, expected Callback or StartCall")
+}
+
+func (t *transferQueueActiveTaskExecutor) processNexusStartTask(
+	ctx context.Context,
+	task *tasks.NexusTask,
+) (retError error) {
+	ns, err := t.registry.GetNamespaceByID(namespace.ID(task.NamespaceID))
+	if err != nil {
+		// TODO: how should this be handled?
+		return err
+	}
+	svc := ns.GetOutboundService(task.StartCall.Service)
+	if svc == nil {
+		// TODO: how should this be handled?
+		return fmt.Errorf("can't find outbound nexus service: %s (namespace: %s)", task.StartCall.Service, ns.Name())
+	}
+
+	weContext, release, err := getWorkflowExecutionContextForTask(ctx, t.shardContext, t.cache, task)
+	if err != nil {
+		return err
+	}
+	defer func() { release(retError) }()
+
+	mutableState, err := loadMutableStateForTransferTask(ctx, t.shardContext, weContext, task, t.metricHandler, t.logger)
+	if err != nil {
+		return err
+	}
+	if mutableState == nil {
+		release(nil) // release(nil) so that the mutable state is not unloaded from cache
+		return consts.ErrWorkflowExecutionNotFound
+	}
+
+	ev, err := mutableState.GetNexusOperationScheduledEvent(ctx, task.StartCall.ScheduledEventId)
+	// TODO: check for terminated and other terminal events
+	// TODO: not sure which errors checks are appropriate
+	if err != nil {
+		return err
+	}
+	// TODO: do we need something like this?
+	// err = CheckTaskVersion(t.shardContext, t.logger, mutableState.GetNamespaceEntry(), ai.Version, task.Version, task)
+	// if err != nil {
+	// 	return err
+	// }
+
+	attrs := ev.GetNexusOperationScheduledEventAttributes()
+
+	// TODO: check which payload is relevant, figure out the encoding...
+	body := bytes.NewReader(attrs.Input.GetData())
+	// TODO: get the "public" URL of the frontend service
+	u, _ := url.Parse("http://localhost/system/callback")
+	q := u.Query()
+	q.Add("namespace", mutableState.GetNamespaceEntry().Name().String())
+	q.Add("workflow_id", mutableState.GetExecutionInfo().GetWorkflowId())
+	q.Add("run_id", mutableState.GetExecutionInfo().GetBaseExecutionInfo().GetRunId())
+	q.Add("scheduled_event_id", fmt.Sprintf("%d", task.StartCall.ScheduledEventId))
+	u.RawQuery = q.Encode()
+	req := nexus.StartOperationOptions{
+		Operation:   attrs.Operation,
+		CallbackURL: u.String(),
+		RequestID:   attrs.RequestId,
+		// TODO: get this from the payload
+		Header: http.Header{"Content-Type": []string{"application/json"}},
+		Body:   body,
+	}
+	// NOTE: do not access anything related mutable state after this lock release
+	// release the context lock since we no longer need mutable state and
+	// the rest of logic is making RPC call, which takes time.
+	release(nil)
+
+	// TODO: this is going to move from here once we have a queue per (source, destination) pair
+	client, err := nexus.NewClient(nexus.ClientOptions{
+		ServiceBaseURL: svc.GetBaseUrl(),
+		HTTPCaller:     t.httpCaller,
+	})
+	if err != nil {
+		return err
+	}
+	result, err := client.StartOperation(ctx, req)
+	if err != nil {
+		// TODO: handle operation failed and 4xx vs. 5xx errors
+		return err
+	}
+	if response := result.Successful; response != nil {
+		fmt.Println("AAAAAAAAAAAAAAAAAAAAAA operation succeeded synchronously")
+		defer response.Body.Close()
+		// TODO: get headers
+		body, err := io.ReadAll(response.Body)
+		if err != nil {
+			return err
+		}
+		payload := &nexuspb.Payload{
+			Headers: map[string]*nexuspb.HeaderValues{"Content-Type": {Elements: []string{"application/json"}}},
+			Body:    body,
+		}
+		t.transitionNexusOperation(ctx, task, func(mutableState workflow.MutableState) error {
+			// TODO: when should bypassTaskGeneration be true?
+			_, err := mutableState.AddNexusOperationCompletedEvent(task.StartCall.ScheduledEventId, payload, false)
+			return err
+		})
+	} else if handle := result.Pending; handle != nil {
+		fmt.Println("AAAAAAAAAAAAAAAAAAAAAA operation started", handle.ID)
+
+		t.transitionNexusOperation(ctx, task, func(mutableState workflow.MutableState) error {
+			// TODO: when should bypassTaskGeneration be true?
+			_, err := mutableState.AddNexusOperationStartedEvent(task.StartCall.ScheduledEventId, handle.ID, false)
+			return err
+		})
+	}
+	return nil
+}
+
+func (t *transferQueueActiveTaskExecutor) transitionNexusOperation(
+	ctx context.Context,
+	task *tasks.NexusTask,
+	updateFunc func(mutableState workflow.MutableState) error,
+) (retError error) {
+	weContext, release, err := getWorkflowExecutionContextForTask(ctx, t.shardContext, t.cache, task)
+	if err != nil {
+		return err
+	}
+	defer func() { release(retError) }()
+
+	return t.updateWorkflowExecution(ctx, weContext, true, updateFunc)
+}
+
+func (t *transferQueueActiveTaskExecutor) processNexusCallbackTask(
+	ctx context.Context,
+	task *tasks.NexusTask,
+) (retError error) {
+	weContext, release, err := getWorkflowExecutionContextForTask(ctx, t.shardContext, t.cache, task)
+	if err != nil {
+		return err
+	}
+	defer func() { release(retError) }()
+
+	mutableState, err := loadMutableStateForTransferTask(ctx, t.shardContext, weContext, task, t.metricHandler, t.logger)
+	if err != nil {
+		return err
+	}
+	if mutableState == nil {
+		release(nil) // release(nil) so that the mutable state is not unloaded from cache
+		return consts.ErrWorkflowExecutionNotFound
+	}
+
+	ce, err := mutableState.GetCompletionEvent(ctx)
+	// TODO: check for terminated and other terminal events
+	// TODO: not sure which errors checks are appropriate
+	if err != nil {
+		return err
+	}
+	// TODO: do we need something like this?
+	// err = CheckTaskVersion(t.shardContext, t.logger, mutableState.GetNamespaceEntry(), ai.Version, task.Version, task)
+	// if err != nil {
+	// 	return err
+	// }
+
+	payloads := ce.GetWorkflowExecutionCompletedEventAttributes().GetResult()
+
+	// NOTE: do not access anything related mutable state after this lock release
+	// release the context lock since we no longer need mutable state and
+	// the rest of logic is making RPC call, which takes time.
+	release(nil)
+	// TODO: check which payload is relevant, figure out the encoding...
+	body := bytes.NewReader(payloads.GetPayloads()[0].Data)
+	completion := nexus.OperationCompletionSuccessful{Header: http.Header{"Content-Type": []string{"application/json"}}, Body: body}
+	u, err := url.Parse(task.Callback.GetUrl())
+	if err != nil {
+		return err
+	}
+	if err := rewriteLocalNexusURL(u, t.frontendResolver); err != nil {
+		return err
+	}
+	req, err := nexus.NewCompletionHTTPRequest(ctx, u.String(), &completion)
+	if err != nil {
+		return err
+	}
+	response, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	// Ignore for now
+	io.ReadAll(response.Body)
+	if response.StatusCode >= 300 {
+		return fmt.Errorf("bad response")
+	}
+	return nil
 }
 
 func (t *transferQueueActiveTaskExecutor) processCancelExecution(

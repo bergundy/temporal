@@ -36,6 +36,7 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	failurepb "go.temporal.io/api/failure/v1"
 	historypb "go.temporal.io/api/history/v1"
+	nexuspb "go.temporal.io/api/nexus/v1"
 	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	updatepb "go.temporal.io/api/update/v1"
@@ -89,7 +90,8 @@ var (
 	// ErrMissingTimerInfo indicates missing timer info
 	ErrMissingTimerInfo = serviceerror.NewInternal("unable to get timer info")
 	// ErrMissingActivityInfo indicates missing activity info
-	ErrMissingActivityInfo = serviceerror.NewInternal("unable to get activity info")
+	ErrMissingActivityInfo        = serviceerror.NewInternal("unable to get activity info")
+	ErrMissingNexusOperationState = serviceerror.NewInternal("unable to get nexus operation state")
 	// ErrMissingChildWorkflowInfo indicates missing child workflow info
 	ErrMissingChildWorkflowInfo = serviceerror.NewInternal("unable to get child workflow info")
 	// ErrMissingRequestCancelInfo indicates missing request cancel info
@@ -137,6 +139,8 @@ type (
 		pendingSignalRequestedIDs map[string]struct{} // Set of signaled requestIds
 		updateSignalRequestedIDs  map[string]struct{} // Set of signaled requestIds since last update
 		deleteSignalRequestedIDs  map[string]struct{} // Deleted signaled requestId
+
+		pendingNexusOperations map[int64]struct{} // Scheduled Event ID -> exists?
 
 		executionInfo  *persistencespb.WorkflowExecutionInfo // Workflow mutable state info.
 		executionState *persistencespb.WorkflowExecutionState
@@ -267,6 +271,9 @@ func NewMutableState(
 		StartTime:        timestamp.TimePtr(startTime),
 		VersionHistories: versionhistory.NewVersionHistories(&historyspb.VersionHistory{}),
 		ExecutionStats:   &persistencespb.ExecutionStats{HistorySize: 0},
+
+		Callbacks:       []*persistencespb.Callback{},
+		OperationStates: make(map[int64]*persistencespb.NexusOperationState),
 	}
 	s.approximateSize += s.executionInfo.Size()
 	s.executionState = &persistencespb.WorkflowExecutionState{State: enumsspb.WORKFLOW_EXECUTION_STATE_CREATED,
@@ -356,6 +363,10 @@ func newMutableStateFromDB(
 	mutableState.executionState = dbRecord.ExecutionState
 	mutableState.approximateSize += dbRecord.ExecutionInfo.Size() - mutableState.executionInfo.Size()
 	mutableState.executionInfo = dbRecord.ExecutionInfo
+	if mutableState.executionInfo.OperationStates == nil {
+		// This may be nil for old histories
+		mutableState.executionInfo.OperationStates = make(map[int64]*persistencespb.NexusOperationState)
+	}
 
 	mutableState.hBuilder = NewMutableHistoryBuilder(
 		mutableState.timeSource,
@@ -1672,6 +1683,7 @@ func (ms *MutableStateImpl) addWorkflowExecutionStartedEventForContinueAsNew(
 		SearchAttributes:         command.SearchAttributes,
 		// No need to request eager execution here (for now)
 		RequestEagerExecution: false,
+		CallbackUrl:           "", // TODO
 	}
 
 	enums.SetDefaultContinueAsNewInitiator(&command.Initiator)
@@ -1833,6 +1845,11 @@ func (ms *MutableStateImpl) ReplicateWorkflowExecutionStartedEvent(
 	ms.executionInfo.WorkflowRunTimeout = event.GetWorkflowRunTimeout()
 	ms.executionInfo.WorkflowExecutionTimeout = event.GetWorkflowExecutionTimeout()
 	ms.executionInfo.DefaultWorkflowTaskTimeout = event.GetWorkflowTaskTimeout()
+	callbackUrl := startEvent.GetWorkflowExecutionStartedEventAttributes().GetCallbackUrl()
+	if callbackUrl != "" {
+		// Append in case there are callbacks carries over from previous run in chain
+		ms.executionInfo.Callbacks = append(ms.executionInfo.Callbacks, &persistencespb.Callback{Url: callbackUrl})
+	}
 
 	if err := ms.UpdateWorkflowStateStatus(
 		enumsspb.WORKFLOW_EXECUTION_STATE_CREATED,
@@ -4219,6 +4236,204 @@ func (ms *MutableStateImpl) ReplicateChildWorkflowExecutionTimedOutEvent(
 	initiatedID := attributes.GetInitiatedEventId()
 
 	return ms.DeletePendingChildExecution(initiatedID)
+}
+
+func (ms *MutableStateImpl) AddNexusOperationScheduledEvent(
+	workflowTaskCompletedEventID int64,
+	command *commandpb.ScheduleNexusOperationCommandAttributes,
+	bypassTaskGeneration bool,
+) (*historypb.HistoryEvent, *persistencespb.NexusOperationState, error) {
+	opTag := tag.WorkflowActionNexusOperationScheduled
+	if err := ms.checkMutability(opTag); err != nil {
+		return nil, nil, err
+	}
+
+	event := ms.hBuilder.AddNexusOperationScheduledEvent(workflowTaskCompletedEventID, command)
+	opState, err := ms.ReplicateNexusOperationScheduledEvent(workflowTaskCompletedEventID, event)
+	// TODO merge active & passive task generation (comment copied from AddActivityTaskScheduledEvent)
+	if !bypassTaskGeneration {
+		if err := ms.taskGenerator.GenerateNexusTasks(
+			event,
+		); err != nil {
+			return nil, nil, err
+		}
+	}
+
+	return event, opState, err
+}
+
+func (ms *MutableStateImpl) AddNexusOperationStartedEvent(
+	scheduledEventID int64,
+	operationID string,
+	bypassTaskGeneration bool, // TODO: tasks?
+) (*historypb.HistoryEvent, error) {
+	state, ok := ms.executionInfo.OperationStates[scheduledEventID]
+	if !ok {
+		// TODO: which error?
+		return nil, ErrMissingNexusOperationState
+	}
+
+	opTag := tag.WorkflowActionNexusOperationScheduled
+	if err := ms.checkMutability(opTag); err != nil {
+		return nil, err
+	}
+
+	event := ms.hBuilder.AddNexusOperationStartedEvent(state, operationID)
+	err := ms.ReplicateNexusOperationStartedEvent(event)
+	// TODO: tasks?
+
+	return event, err
+}
+
+func (ms *MutableStateImpl) ReplicateNexusOperationStartedEvent(
+	event *historypb.HistoryEvent,
+) error {
+	attributes := event.GetNexusOperationStartedEventAttributes()
+
+	state := ms.executionInfo.OperationStates[attributes.ScheduledEventId]
+	switch prevState := state.State.(type) {
+	case *persistencespb.NexusOperationState_Scheduled:
+		state.State = &persistencespb.NexusOperationState_Started{
+			Started: &persistencespb.NexusOperationStarted{
+				PreviousState: prevState.Scheduled,
+				Transition: &persistencespb.StateMachineTransition{
+					EventId: event.GetEventId(),
+					Time:    event.GetEventTime(),
+				},
+			},
+		}
+	}
+	ms.writeEventToCache(event)
+	return nil
+}
+
+func (ms *MutableStateImpl) AddNexusOperationCompletedEvent(
+	scheduledEventID int64,
+	payload *nexuspb.Payload,
+	bypassTaskGeneration bool, // TODO: tasks?
+) (*historypb.HistoryEvent, error) {
+	state, ok := ms.executionInfo.OperationStates[scheduledEventID]
+	if !ok {
+		// TODO: which error?
+		return nil, ErrMissingNexusOperationState
+	}
+
+	opTag := tag.WorkflowActionNexusOperationScheduled
+	if err := ms.checkMutability(opTag); err != nil {
+		return nil, err
+	}
+
+	var startedEventID int64
+	switch state := state.State.(type) {
+	case *persistencespb.NexusOperationState_Started:
+		startedEventID = state.Started.Transition.EventId
+	}
+	event := ms.hBuilder.AddNexusOperationCompletedEvent(state, payload, startedEventID)
+	err := ms.ReplicateNexusOperationCompletedEvent(event)
+	// TODO: tasks?
+
+	return event, err
+}
+
+func (ms *MutableStateImpl) ReplicateNexusOperationCompletedEvent(
+	event *historypb.HistoryEvent,
+) error {
+	attributes := event.GetNexusOperationCompletedEventAttributes()
+
+	state := ms.executionInfo.OperationStates[attributes.ScheduledEventId]
+	switch prevState := state.State.(type) {
+	case *persistencespb.NexusOperationState_Started:
+		state.State = &persistencespb.NexusOperationState_Succeeded{
+			Succeeded: &persistencespb.NexusOperationSucceeded{
+				PreviousState: &persistencespb.NexusOperationSucceeded_Started{
+					Started: prevState.Started,
+				},
+				Transition: &persistencespb.StateMachineTransition{
+					EventId: event.GetEventId(),
+					Time:    event.GetEventTime(),
+				},
+			},
+		}
+	case *persistencespb.NexusOperationState_Scheduled:
+		state.State = &persistencespb.NexusOperationState_Succeeded{
+			Succeeded: &persistencespb.NexusOperationSucceeded{
+				PreviousState: &persistencespb.NexusOperationSucceeded_Scheduled{
+					Scheduled: prevState.Scheduled,
+				},
+				Transition: &persistencespb.StateMachineTransition{
+					EventId: event.GetEventId(),
+					Time:    event.GetEventTime(),
+				},
+			},
+		}
+	}
+	// TODO: invalid transition?
+	ms.writeEventToCache(event)
+	return nil
+}
+
+func (ms *MutableStateImpl) GetNexusOperationScheduledEvent(ctx context.Context, scheduledEventID int64) (*historypb.HistoryEvent, error) {
+	st, ok := ms.executionInfo.OperationStates[scheduledEventID]
+	if !ok {
+		fmt.Println("AAAAAAAAAAAAAAAAAAAAA can't find operation state for:", scheduledEventID)
+		return nil, ErrMissingNexusOperationState
+	}
+
+	currentBranchToken, version, err := ms.getCurrentBranchTokenAndEventVersion(st.ScheduledEventId)
+	if err != nil {
+		return nil, err
+	}
+	event, err := ms.eventsCache.GetEvent(
+		ctx,
+		events.EventKey{
+			NamespaceID: namespace.ID(ms.executionInfo.NamespaceId),
+			WorkflowID:  ms.executionInfo.WorkflowId,
+			RunID:       ms.executionState.RunId,
+			EventID:     st.ScheduledEventId,
+			Version:     version,
+		},
+		st.ScheduledEventBatchId,
+		currentBranchToken,
+	)
+	if err != nil {
+		if common.IsNotFoundError(err) {
+			// do not return the original error
+			// since original error of type NotFound
+			// can cause task processing side to fail silently
+			return nil, ErrMissingActivityScheduledEvent
+		}
+		return nil, err
+	}
+	return event, nil
+}
+
+func (ms *MutableStateImpl) ReplicateNexusOperationScheduledEvent(
+	firstEventID int64,
+	event *historypb.HistoryEvent,
+) (*persistencespb.NexusOperationState, error) {
+	attributes := event.GetNexusOperationScheduledEventAttributes()
+	scheduledEventId := event.GetEventId()
+
+	state := &persistencespb.NexusOperationState{
+		Version:               event.GetVersion(),
+		ScheduledEventId:      scheduledEventId,
+		ScheduledEventBatchId: firstEventID,
+		ScheduledTime:         event.GetEventTime(),
+		RequestId:             attributes.RequestId,
+		Service:               attributes.Service,
+		Operation:             attributes.Operation,
+		Timeout:               attributes.GetTimeout(),
+		State: &persistencespb.NexusOperationState_Scheduled{
+			Scheduled: &persistencespb.NexusOperationScheduled{
+				Attempt: 1,
+			},
+		},
+	}
+
+	fmt.Println("AAAAAAAAAAAAAAAAAA", "adding operation state:", scheduledEventId)
+	ms.executionInfo.OperationStates[scheduledEventId] = state
+	ms.writeEventToCache(event)
+	return state, nil
 }
 
 func (ms *MutableStateImpl) RetryActivity(

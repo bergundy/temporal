@@ -56,6 +56,12 @@ const (
 	// can have. This is currently set to the max gRPC request size.
 	MaxHTTPAPIRequestBytes = 4 * 1024 * 1024
 
+	// MaxNexusAPIRequestHeaderBytes is the maximum number of bytes a Nexus HTTP API request header can have.
+	MaxNexusAPIRequestHeaderBytes = 16 * 1024
+	// MaxNexusAPIRequestBodyBytes is the maximum number of bytes a Nexus HTTP API request body can have. This is
+	// currently set to the max size of a single Payload object with 16KB of space for metadata.
+	MaxNexusAPIRequestBodyBytes = 2*1024*1024 - MaxNexusAPIRequestHeaderBytes
+
 	// minConnectTimeout is the minimum amount of time we are willing to give a connection to complete.
 	minConnectTimeout = 20 * time.Second
 

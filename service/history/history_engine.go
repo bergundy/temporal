@@ -358,6 +358,42 @@ func (e *historyEngineImpl) StartWorkflowExecution(
 	return starter.Invoke(ctx)
 }
 
+// TODO: move me
+func (e *historyEngineImpl) CompleteNexusOperation(ctx context.Context, request *historyservice.CompleteNexusOperationRequest) (*historyservice.CompleteNexusOperationResponse, error) {
+	wfKey := definition.NewWorkflowKey(
+		request.NamespaceId,
+		request.WorkflowId,
+		request.RunId,
+	)
+	err := api.GetAndUpdateWorkflowWithNew(
+		ctx,
+		nil,
+		api.BypassMutableStateConsistencyPredicate,
+		wfKey,
+		func(weCtx api.WorkflowContext) (*api.UpdateWorkflowAction, error) {
+			ms := weCtx.GetMutableState()
+			if !ms.IsWorkflowExecutionRunning() {
+				return nil, consts.ErrWorkflowCompleted
+			}
+			_, err := ms.AddNexusOperationCompletedEvent(request.GetScheduledEventId(), request.GetPayload(), false)
+			if err != nil {
+				return nil, err
+			}
+			return &api.UpdateWorkflowAction{
+				CreateWorkflowTask: true,
+			}, nil
+		},
+		nil,
+		e.shardContext,
+		e.workflowConsistencyChecker,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	return &historyservice.CompleteNexusOperationResponse{}, nil
+}
+
 // GetMutableState retrieves the mutable state of the workflow execution
 func (e *historyEngineImpl) GetMutableState(
 	ctx context.Context,

@@ -79,6 +79,21 @@ func (mr *MockEngineMockRecorder) AddSpeculativeWorkflowTaskTimeoutTask(task int
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddSpeculativeWorkflowTaskTimeoutTask", reflect.TypeOf((*MockEngine)(nil).AddSpeculativeWorkflowTaskTimeoutTask), task)
 }
 
+// CompleteNexusOperation mocks base method.
+func (m *MockEngine) CompleteNexusOperation(ctx context.Context, request *historyservice.CompleteNexusOperationRequest) (*historyservice.CompleteNexusOperationResponse, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "CompleteNexusOperation", ctx, request)
+	ret0, _ := ret[0].(*historyservice.CompleteNexusOperationResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// CompleteNexusOperation indicates an expected call of CompleteNexusOperation.
+func (mr *MockEngineMockRecorder) CompleteNexusOperation(ctx, request interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CompleteNexusOperation", reflect.TypeOf((*MockEngine)(nil).CompleteNexusOperation), ctx, request)
+}
+
 // ConvertReplicationTask mocks base method.
 func (m *MockEngine) ConvertReplicationTask(ctx context.Context, task tasks.Task) (*repication.ReplicationTask, error) {
 	m.ctrl.T.Helper()

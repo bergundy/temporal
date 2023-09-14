@@ -157,6 +157,36 @@ func (c *clientImpl) ListTaskQueuePartitions(
 	return client.ListTaskQueuePartitions(ctx, request, opts...)
 }
 
+func (c *clientImpl) PollNexusTaskQueue(
+	ctx context.Context,
+	request *matchingservice.PollNexusTaskQueueRequest,
+	opts ...grpc.CallOption,
+) (*matchingservice.PollNexusTaskQueueResponse, error) {
+
+	client, err := c.getClientForTaskqueue(request.GetNamespaceId(), request.GetRequest().GetTaskQueue(), enumspb.TASK_QUEUE_TYPE_NEXUS)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := c.createContext(ctx)
+	defer cancel()
+	return client.PollNexusTaskQueue(ctx, request, opts...)
+}
+
+func (c *clientImpl) ProcessNexusTask(
+	ctx context.Context,
+	request *matchingservice.ProcessNexusTaskRequest,
+	opts ...grpc.CallOption,
+) (*matchingservice.ProcessNexusTaskResponse, error) {
+
+	client, err := c.getClientForTaskqueue(request.GetNamespaceId(), request.GetTaskQueue(), enumspb.TASK_QUEUE_TYPE_NEXUS)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := c.createContext(ctx)
+	defer cancel()
+	return client.ProcessNexusTask(ctx, request, opts...)
+}
+
 func (c *clientImpl) ReplicateTaskQueueUserData(
 	ctx context.Context,
 	request *matchingservice.ReplicateTaskQueueUserDataRequest,
@@ -170,6 +200,21 @@ func (c *clientImpl) ReplicateTaskQueueUserData(
 	ctx, cancel := c.createContext(ctx)
 	defer cancel()
 	return client.ReplicateTaskQueueUserData(ctx, request, opts...)
+}
+
+func (c *clientImpl) RespondNexusTaskCompleted(
+	ctx context.Context,
+	request *matchingservice.RespondNexusTaskCompletedRequest,
+	opts ...grpc.CallOption,
+) (*matchingservice.RespondNexusTaskCompletedResponse, error) {
+
+	client, err := c.getClientForTaskqueue(request.GetNamespaceId(), request.GetTaskQueue(), enumspb.TASK_QUEUE_TYPE_NEXUS)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := c.createContext(ctx)
+	defer cancel()
+	return client.RespondNexusTaskCompleted(ctx, request, opts...)
 }
 
 func (c *clientImpl) RespondQueryTaskCompleted(

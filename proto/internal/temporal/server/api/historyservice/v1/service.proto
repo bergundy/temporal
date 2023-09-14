@@ -297,6 +297,10 @@ service HistoryService {
     rpc PollWorkflowExecutionUpdate(PollWorkflowExecutionUpdateRequest) returns (PollWorkflowExecutionUpdateResponse){
     }
 
+    // TODO: support failed completions
+    rpc CompleteNexusOperation(CompleteNexusOperationRequest) returns (CompleteNexusOperationResponse) {
+    }
+
     rpc StreamWorkflowReplicationMessages(stream StreamWorkflowReplicationMessagesRequest) returns (stream StreamWorkflowReplicationMessagesResponse) {
     }
 }
