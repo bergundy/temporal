@@ -426,6 +426,7 @@ func (c *temporalImpl) startFrontend(hosts map[primitives.ServiceName][]string, 
 			persistenceConfig,
 			serviceName,
 		),
+
 		fx.Provide(c.frontendConfigProvider),
 		fx.Provide(func() listenHostPort { return listenHostPort(c.FrontendGRPCAddress()) }),
 		fx.Provide(func() config.DCRedirectionPolicy { return config.DCRedirectionPolicy{} }),
@@ -800,11 +801,13 @@ func (c *temporalImpl) GetMetricsHandler() metrics.Handler {
 func (c *temporalImpl) frontendConfigProvider() *config.Config {
 	// Set HTTP port and a test HTTP forwarded header
 	_, httpPort := c.FrontendHTTPHostPort()
+	_, nexusPort := c.NexusHTTPHostPort()
 	return &config.Config{
 		Services: map[string]config.Service{
 			string(primitives.FrontendService): {
 				RPC: config.RPC{
 					HTTPPort:                       httpPort,
+					NexusPort:                      nexusPort,
 					HTTPAdditionalForwardedHeaders: []string{"this-header-forwarded"},
 				},
 			},

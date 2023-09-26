@@ -25,7 +25,13 @@
 package persistence
 
 import (
+	"context"
 	"net/url"
+	"strings"
+	"sync"
+
+	"github.com/gogo/status"
+	"google.golang.org/grpc/codes"
 )
 
 // TODO: protobuf?
@@ -43,14 +49,74 @@ type Service struct {
 type IncomingServiceRegistry interface {
 	// MatchURL returns a non nil Service if the URL matches a registered service.
 	MatchURL(*url.URL) *Service
+	// Get a service by its BaseURL.
+	GetService(context.Context, string) (*Service, error)
+	// Insert of update service using its BaseURL as key.
+	UpsertService(context.Context, *Service) error
+	// Remove a service by its BaseURL.
+	RemoveService(context.Context, string) error
+	// List all registered services.
+	ListServices(context.Context) ([]*Service, error)
 }
 
-type PersistedIncomingServiceRegistry struct {
+// TODO: replace with persisted registry
+type InMemoryWIPIncomingServiceRegistry struct {
+	lock     sync.RWMutex
+	services map[string]*Service
+}
+
+var _ IncomingServiceRegistry = (*InMemoryWIPIncomingServiceRegistry)(nil)
+
+// GetService implements IncomingServiceRegistry.
+func (r *InMemoryWIPIncomingServiceRegistry) GetService(ctx context.Context, baseURL string) (*Service, error) {
+	r.lock.RLock()
+	defer r.lock.RUnlock()
+	if service, found := r.services[baseURL]; found {
+		return service, nil
+	}
+	return nil, status.Errorf(codes.NotFound, "service not found")
+}
+
+// ListServices implements IncomingServiceRegistry.
+func (r *InMemoryWIPIncomingServiceRegistry) ListServices(context.Context) ([]*Service, error) {
+	r.lock.RLock()
+	defer r.lock.RUnlock()
+	values := make([]*Service, 0, len(r.services))
+	for _, v := range r.services {
+		values = append(values, v)
+	}
+
+	return values, nil
+}
+
+// RemoveService implements IncomingServiceRegistry.
+func (r *InMemoryWIPIncomingServiceRegistry) RemoveService(ctx context.Context, baseURL string) error {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	if _, found := r.services[baseURL]; !found {
+		return status.Errorf(codes.NotFound, "service not found")
+	}
+
+	delete(r.services, baseURL)
+	return nil
+}
+
+// UpsertService implements IncomingServiceRegistry.
+func (r *InMemoryWIPIncomingServiceRegistry) UpsertService(ctx context.Context, service *Service) error {
+	r.lock.Lock()
+	defer r.lock.Unlock()
+	r.services[service.BaseURL] = service
+	return nil
 }
 
 // MatchURL implements IncomingServiceRegistry.
-func (*PersistedIncomingServiceRegistry) MatchURL(u *url.URL) *Service {
-	panic("unimplemented")
+func (r *InMemoryWIPIncomingServiceRegistry) MatchURL(u *url.URL) *Service {
+	r.lock.RLock()
+	defer r.lock.RUnlock()
+	for _, service := range r.services {
+		if strings.HasPrefix(u.Path, service.BaseURL) {
+			return service
+		}
+	}
+	return nil
 }
-
-var _ IncomingServiceRegistry = (*PersistedIncomingServiceRegistry)(nil)

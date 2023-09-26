@@ -8,9 +8,6 @@ import (
 )
 
 func (s *clientIntegrationSuite) TestNexusStartOperation() {
-	// if s.nexusHTTPAddress == "" {
-	// 	s.T().Skip("Nexus API server not enabled")
-	// }
 	client, err := nexus.NewClient(nexus.ClientOptions{
 		ServiceBaseURL: fmt.Sprintf("http://%s/my/service", s.nexusHTTPAddress),
 	})
