@@ -44,11 +44,6 @@ import (
 	"go.temporal.io/server/common/persistence/client"
 	"go.temporal.io/server/common/persistence/visibility"
 	"go.temporal.io/server/common/persistence/visibility/manager"
-	"go.temporal.io/server/common/util"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/health"
-	healthpb "google.golang.org/grpc/health/grpc_health_v1"
-	"google.golang.org/grpc/reflection"
 )
 
 // Config represents configuration for frontend service
@@ -378,8 +373,8 @@ func (s *Service) Stop() {
 	// 4. Wait for X second
 	// 5. Stop everything forcefully and return
 
-	requestDrainTime := util.Max(time.Second, s.config.ShutdownDrainDuration())
-	failureDetectionTime := util.Max(0, s.config.ShutdownFailHealthCheckDuration())
+	requestDrainTime := max(time.Second, s.config.ShutdownDrainDuration())
+	failureDetectionTime := max(0, s.config.ShutdownFailHealthCheckDuration())
 
 	s.logger.Info("ShutdownHandler: Updating gRPC health status to ShuttingDown")
 	s.healthServer.Shutdown()

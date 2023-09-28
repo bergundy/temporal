@@ -457,9 +457,9 @@ func (w *perNamespaceWorker) startWorker(
 	sdkoptions.WorkerActivitiesPerSecond = dcOptions.WorkerActivitiesPerSecond
 	sdkoptions.MaxConcurrentLocalActivityExecutionSize = dcOptions.MaxConcurrentLocalActivityExecutionSize
 	sdkoptions.WorkerLocalActivitiesPerSecond = dcOptions.WorkerLocalActivitiesPerSecond
-	sdkoptions.MaxConcurrentActivityTaskPollers = util.Max(2, dcOptions.MaxConcurrentActivityTaskPollers)
-	sdkoptions.MaxConcurrentWorkflowTaskExecutionSize = dcOptions.MaxConcurrentWorkflowTaskExecutionSize
-	sdkoptions.MaxConcurrentWorkflowTaskPollers = util.Max(2, dcOptions.MaxConcurrentWorkflowTaskPollers)
+	sdkoptions.MaxConcurrentActivityTaskPollers = max(util.Coalesce(dcOptions.MaxConcurrentActivityTaskPollers, 2), 2)
+	sdkoptions.MaxConcurrentWorkflowTaskExecutionSize = util.Coalesce(dcOptions.MaxConcurrentWorkflowTaskExecutionSize, 1000)
+	sdkoptions.MaxConcurrentWorkflowTaskPollers = max(util.Coalesce(dcOptions.MaxConcurrentWorkflowTaskPollers, 2), 2)
 	sdkoptions.StickyScheduleToStartTimeout = dcOptions.StickyScheduleToStartTimeoutDuration
 
 	sdkoptions.BackgroundActivityContext = headers.SetCallerInfo(context.Background(), headers.NewBackgroundCallerInfo(ns.Name().String()))
