@@ -37,7 +37,7 @@ import (
 	"go.temporal.io/server/api/adminservice/v1"
 )
 
-func (s *clientIntegrationSuite) TestAdminRebuildMutableState() {
+func (s *clientFunctionalSuite) TestAdminRebuildMutableState() {
 
 	syncLock := sync.Mutex{}
 	syncLock.Lock()
@@ -58,7 +58,7 @@ func (s *clientIntegrationSuite) TestAdminRebuildMutableState() {
 
 	s.worker.RegisterWorkflow(workflowFn)
 
-	workflowID := "integration-admin-rebuild-mutable-state-test"
+	workflowID := "functional-admin-rebuild-mutable-state-test"
 	workflowOptions := sdkclient.StartWorkflowOptions{
 		ID:                 workflowID,
 		TaskQueue:          s.taskQueue,

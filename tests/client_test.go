@@ -65,11 +65,11 @@ import (
 )
 
 type (
-	clientIntegrationSuite struct {
+	clientFunctionalSuite struct {
 		// override suite.Suite.Assertions with require.Assertions; this means that s.NotNil(nil) will stop the test,
 		// not merely log an error
 		*require.Assertions
-		IntegrationBase
+		FunctionalTestBase
 		hostPort                  string
 		sdkClient                 sdkclient.Client
 		worker                    worker.Worker
@@ -86,12 +86,12 @@ var (
 	ErrEncodingIsNotSupported = errors.New("payload encoding is not supported")
 )
 
-func TestClientIntegrationSuite(t *testing.T) {
+func TestClientFunctionalSuite(t *testing.T) {
 	flag.Parse()
-	suite.Run(t, new(clientIntegrationSuite))
+	suite.Run(t, new(clientFunctionalSuite))
 }
 
-func (s *clientIntegrationSuite) SetupSuite() {
+func (s *clientFunctionalSuite) SetupSuite() {
 	// these limits are higher in production, but our tests would take too long if we set them that high
 	limit := 10
 	s.maxPendingChildExecutions = limit
@@ -104,7 +104,7 @@ func (s *clientIntegrationSuite) SetupSuite() {
 		dynamicconfig.NumPendingCancelRequestsLimitError:  s.maxPendingCancelRequests,
 		dynamicconfig.NumPendingSignalsLimitError:         s.maxPendingSignals,
 	}
-	s.setupSuite("testdata/clientintegrationtestcluster.yaml")
+	s.setupSuite("testdata/client_cluster.yaml")
 
 	s.hostPort = "127.0.0.1:7134"
 	if TestFlags.FrontendAddr != "" {
@@ -112,11 +112,11 @@ func (s *clientIntegrationSuite) SetupSuite() {
 	}
 }
 
-func (s *clientIntegrationSuite) TearDownSuite() {
+func (s *clientFunctionalSuite) TearDownSuite() {
 	s.tearDownSuite()
 }
 
-func (s *clientIntegrationSuite) SetupTest() {
+func (s *clientFunctionalSuite) SetupTest() {
 	// Have to define our overridden assertions in the test setup. If we did it earlier, s.T() will return nil
 	s.Assertions = require.New(s.T())
 
@@ -138,7 +138,7 @@ func (s *clientIntegrationSuite) SetupTest() {
 	}
 }
 
-func (s *clientIntegrationSuite) TearDownTest() {
+func (s *clientFunctionalSuite) TearDownTest() {
 	s.worker.Stop()
 	s.sdkClient.Close()
 }
@@ -270,7 +270,7 @@ func testDataConverterWorkflow(ctx workflow.Context, tl string) (string, error) 
 	return result + "," + result1, nil
 }
 
-func (s *clientIntegrationSuite) startWorkerWithDataConverter(tl string, dataConverter converter.DataConverter) (sdkclient.Client, worker.Worker) {
+func (s *clientFunctionalSuite) startWorkerWithDataConverter(tl string, dataConverter converter.DataConverter) (sdkclient.Client, worker.Worker) {
 	sdkClient, err := sdkclient.Dial(sdkclient.Options{
 		HostPort:      s.hostPort,
 		Namespace:     s.namespace,
@@ -290,8 +290,8 @@ func (s *clientIntegrationSuite) startWorkerWithDataConverter(tl string, dataCon
 	return sdkClient, worker
 }
 
-func (s *clientIntegrationSuite) TestClientDataConverter() {
-	tl := "client-integration-data-converter-activity-taskqueue"
+func (s *clientFunctionalSuite) TestClientDataConverter() {
+	tl := "client-func-data-converter-activity-taskqueue"
 	dc := newTestDataConverter()
 	sdkClient, worker := s.startWorkerWithDataConverter(tl, dc)
 	defer func() {
@@ -299,7 +299,7 @@ func (s *clientIntegrationSuite) TestClientDataConverter() {
 		sdkClient.Close()
 	}()
 
-	id := "client-integration-data-converter-workflow"
+	id := "client-func-data-converter-workflow"
 	workflowOptions := sdkclient.StartWorkflowOptions{
 		ID:                 id,
 		TaskQueue:          s.taskQueue,
@@ -327,15 +327,15 @@ func (s *clientIntegrationSuite) TestClientDataConverter() {
 	s.Equal(1, d.NumOfCallFromPayloads)
 }
 
-func (s *clientIntegrationSuite) TestClientDataConverter_Failed() {
-	tl := "client-integration-data-converter-activity-failed-taskqueue"
+func (s *clientFunctionalSuite) TestClientDataConverter_Failed() {
+	tl := "client-func-data-converter-activity-failed-taskqueue"
 	sdkClient, worker := s.startWorkerWithDataConverter(tl, nil) // mismatch of data converter
 	defer func() {
 		worker.Stop()
 		sdkClient.Close()
 	}()
 
-	id := "client-integration-data-converter-failed-workflow"
+	id := "client-func-data-converter-failed-workflow"
 	workflowOptions := sdkclient.StartWorkflowOptions{
 		ID:                 id,
 		TaskQueue:          s.taskQueue,
@@ -377,7 +377,7 @@ func (s *clientIntegrationSuite) TestClientDataConverter_Failed() {
 	s.Equal(1, failedAct)
 }
 
-var childTaskQueue = "client-integration-data-converter-child-taskqueue"
+var childTaskQueue = "client-func-data-converter-child-taskqueue"
 
 func testParentWorkflow(ctx workflow.Context) (string, error) {
 	logger := workflow.GetLogger(ctx)
@@ -435,7 +435,7 @@ func testChildWorkflow(ctx workflow.Context, totalCount, runCount int) (string, 
 	return "", workflow.NewContinueAsNewError(ctx, testChildWorkflow, totalCount, runCount)
 }
 
-func (s *clientIntegrationSuite) TestClientDataConverter_WithChild() {
+func (s *clientFunctionalSuite) TestClientDataConverter_WithChild() {
 	dc := newTestDataConverter()
 	sdkClient, worker := s.startWorkerWithDataConverter(childTaskQueue, dc)
 	defer func() {
@@ -443,7 +443,7 @@ func (s *clientIntegrationSuite) TestClientDataConverter_WithChild() {
 		sdkClient.Close()
 	}()
 
-	id := "client-integration-data-converter-with-child-workflow"
+	id := "client-func-data-converter-with-child-workflow"
 	workflowOptions := sdkclient.StartWorkflowOptions{
 		ID:                 id,
 		TaskQueue:          s.taskQueue,
@@ -472,10 +472,10 @@ func (s *clientIntegrationSuite) TestClientDataConverter_WithChild() {
 	s.Equal(2, d.NumOfCallFromPayloads)
 }
 
-func (s *clientIntegrationSuite) TestTooManyChildWorkflows() {
+func (s *clientFunctionalSuite) TestTooManyChildWorkflows() {
 	// To ensure that there is one pending child workflow before we try to create the next one,
 	// we create a child workflow here that signals the parent when it has started and then blocks forever.
-	parentWorkflowId := "client-integration-too-many-child-workflows"
+	parentWorkflowId := "client-func-too-many-child-workflows"
 	blockingChildWorkflow := func(ctx workflow.Context) error {
 		workflow.SignalExternalWorkflow(ctx, parentWorkflowId, "", "blocking-child-started", nil)
 		workflow.GetSignalChannel(ctx, "unblock-child").Receive(ctx, nil)
@@ -544,7 +544,7 @@ func (s *clientIntegrationSuite) TestTooManyChildWorkflows() {
 
 // TestTooManyPendingActivities verifies that we don't allow users to schedule new activities when they've already
 // reached the limit for pending activities.
-func (s *clientIntegrationSuite) TestTooManyPendingActivities() {
+func (s *clientFunctionalSuite) TestTooManyPendingActivities() {
 	timeout := time.Minute * 5
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -615,7 +615,7 @@ func (s *clientIntegrationSuite) TestTooManyPendingActivities() {
 	})
 }
 
-func (s *clientIntegrationSuite) TestTooManyCancelRequests() {
+func (s *clientFunctionalSuite) TestTooManyCancelRequests() {
 	// set a timeout for this whole test
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*5)
 	defer cancel()
@@ -703,7 +703,7 @@ func (s *clientIntegrationSuite) TestTooManyCancelRequests() {
 	})
 }
 
-func (s *clientIntegrationSuite) TestTooManyPendingSignals() {
+func (s *clientFunctionalSuite) TestTooManyPendingSignals() {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	receiverId := "receiver-id"
@@ -779,7 +779,7 @@ func continueAsNewTightLoop(ctx workflow.Context, currCount, maxCount int) (int,
 	return currCount, workflow.NewContinueAsNewError(ctx, continueAsNewTightLoop, currCount+1, maxCount)
 }
 
-func (s *clientIntegrationSuite) TestContinueAsNewTightLoop() {
+func (s *clientFunctionalSuite) TestContinueAsNewTightLoop() {
 	// Simulate continue as new tight loop, and verify server throttle the rate.
 	workflowId := "continue_as_new_tight_loop"
 	s.worker.RegisterWorkflow(continueAsNewTightLoop)
@@ -803,7 +803,7 @@ func (s *clientIntegrationSuite) TestContinueAsNewTightLoop() {
 	s.GreaterOrEqual(duration, time.Second*4)
 }
 
-func (s *clientIntegrationSuite) TestStickyAutoReset() {
+func (s *clientFunctionalSuite) TestStickyAutoReset() {
 	// This test starts a workflow, wait and verify that the workflow is on sticky task queue.
 	// Then it stops the worker for 10s, this will make matching aware that sticky worker is dead.
 	// Then test sends a signal to the workflow to trigger a new workflow task.
@@ -893,7 +893,7 @@ func (s *clientIntegrationSuite) TestStickyAutoReset() {
 	s.Equal(int64(1), task.History.Events[0].EventId)
 }
 
-func (s *clientIntegrationSuite) eventuallySucceeds(ctx context.Context, operationCtx backoff.OperationCtx) {
+func (s *clientFunctionalSuite) eventuallySucceeds(ctx context.Context, operationCtx backoff.OperationCtx) {
 	s.T().Helper()
 	s.NoError(backoff.ThrottleRetryContext(
 		ctx,
@@ -906,7 +906,7 @@ func (s *clientIntegrationSuite) eventuallySucceeds(ctx context.Context, operati
 	))
 }
 
-func (s *clientIntegrationSuite) historyContainsFailureCausedBy(
+func (s *clientFunctionalSuite) historyContainsFailureCausedBy(
 	ctx context.Context,
 	workflowId string,
 	cause enumspb.WorkflowTaskFailedCause,
@@ -934,7 +934,7 @@ func (s *clientIntegrationSuite) historyContainsFailureCausedBy(
 	})
 }
 
-func (s *clientIntegrationSuite) Test_StickyWorkerRestartWorkflowTask() {
+func (s *clientFunctionalSuite) Test_StickyWorkerRestartWorkflowTask() {
 	testCases := []struct {
 		name       string
 		waitTime   time.Duration
@@ -1070,7 +1070,7 @@ func (s *clientIntegrationSuite) Test_StickyWorkerRestartWorkflowTask() {
 	}
 }
 
-func (s *clientIntegrationSuite) Test_ActivityTimeouts() {
+func (s *clientFunctionalSuite) Test_ActivityTimeouts() {
 	activityFn := func(ctx context.Context) error {
 		info := activity.GetInfo(ctx)
 		if info.ActivityID == "Heartbeat" {
@@ -1148,7 +1148,7 @@ func (s *clientIntegrationSuite) Test_ActivityTimeouts() {
 	s.worker.RegisterActivity(activityFn)
 	s.worker.RegisterWorkflow(workflowFn)
 
-	id := "integration-test-activity-timeouts"
+	id := "functional-test-activity-timeouts"
 	workflowOptions := sdkclient.StartWorkflowOptions{
 		ID:                 id,
 		TaskQueue:          s.taskQueue,
@@ -1216,7 +1216,7 @@ func (s *clientIntegrationSuite) Test_ActivityTimeouts() {
 //	Server rescheduled a new workflow task.
 //	Workflow runs the local activity again and drain the signal chan (with one signal) and complete workflow.
 //	Server complete workflow as requested.
-func (s *clientIntegrationSuite) Test_UnhandledCommandAndNewTask() {
+func (s *clientFunctionalSuite) Test_UnhandledCommandAndNewTask() {
 	sigReadyToSendChan := make(chan struct{}, 1)
 	sigSendDoneChan := make(chan struct{})
 	localActivityFn := func(ctx context.Context) error {
@@ -1264,7 +1264,7 @@ func (s *clientIntegrationSuite) Test_UnhandledCommandAndNewTask() {
 
 	s.worker.RegisterWorkflow(workflowFn)
 
-	id := "integration-test-unhandled-command-new-task"
+	id := "functional-test-unhandled-command-new-task"
 	workflowOptions := sdkclient.StartWorkflowOptions{
 		ID:        id,
 		TaskQueue: s.taskQueue,
@@ -1314,7 +1314,7 @@ func (s *clientIntegrationSuite) Test_UnhandledCommandAndNewTask() {
 	s.assertHistory(id, workflowRun.GetRunID(), expectedHistory)
 }
 
-func (s *clientIntegrationSuite) Test_CancelActivityAndTimerBeforeComplete() {
+func (s *clientFunctionalSuite) Test_CancelActivityAndTimerBeforeComplete() {
 	workflowFn := func(ctx workflow.Context) error {
 		ctx, cancelFunc := workflow.WithCancel(ctx)
 
@@ -1358,7 +1358,7 @@ func (s *clientIntegrationSuite) Test_CancelActivityAndTimerBeforeComplete() {
 // Server is expected to fail the workflow task and schedule a retry immediately for first attempt,
 // but if workflow task keeps failing, server will drop the task and wait for timeout to schedule additional retries.
 // This is the same behavior as the SDK used to do, but now we would do on server.
-func (s *clientIntegrationSuite) Test_InvalidCommandAttribute() {
+func (s *clientFunctionalSuite) Test_InvalidCommandAttribute() {
 	activityFn := func(ctx context.Context) error {
 		return nil
 	}
@@ -1375,7 +1375,7 @@ func (s *clientIntegrationSuite) Test_InvalidCommandAttribute() {
 	s.worker.RegisterWorkflow(workflowFn)
 	s.worker.RegisterActivity(activityFn)
 
-	id := "integration-test-invalid-command-attributes"
+	id := "functional-test-invalid-command-attributes"
 	workflowOptions := sdkclient.StartWorkflowOptions{
 		ID:        id,
 		TaskQueue: s.taskQueue,
@@ -1417,7 +1417,7 @@ func (s *clientIntegrationSuite) Test_InvalidCommandAttribute() {
 	s.True(calledTime[2].Sub(calledTime[1]) > time.Second*3) // retry after WorkflowTaskTimeout
 }
 
-func (s *clientIntegrationSuite) Test_BufferedQuery() {
+func (s *clientFunctionalSuite) Test_BufferedQuery() {
 	localActivityFn := func(ctx context.Context) error {
 		time.Sleep(5 * time.Second) // use local activity sleep to block workflow task to force query to be buffered
 		return nil
@@ -1447,7 +1447,7 @@ func (s *clientIntegrationSuite) Test_BufferedQuery() {
 
 	s.worker.RegisterWorkflow(workflowFn)
 
-	id := "integration-test-buffered-query"
+	id := "functional-test-buffered-query"
 	workflowOptions := sdkclient.StartWorkflowOptions{
 		ID:                 id,
 		TaskQueue:          s.taskQueue,
@@ -1494,7 +1494,7 @@ func (s *clientIntegrationSuite) Test_BufferedQuery() {
 }
 
 // Uncomment if you need to debug history.
-// func (s *clientIntegrationSuite) printHistory(workflowID string, runID string) {
+// func (s *clientFunctionalSuite) printHistory(workflowID string, runID string) {
 // 	iter := s.sdkClient.GetWorkflowHistory(context.Background(), workflowID, runID, false, 0)
 // 	history := &historypb.History{}
 // 	for iter.HasNext() {
@@ -1505,7 +1505,7 @@ func (s *clientIntegrationSuite) Test_BufferedQuery() {
 // 	common.PrettyPrintHistory(history, s.Logger)
 // }
 
-func (s *clientIntegrationSuite) assertHistory(wid, rid string, expected []enumspb.EventType) {
+func (s *clientFunctionalSuite) assertHistory(wid, rid string, expected []enumspb.EventType) {
 	iter := s.sdkClient.GetWorkflowHistory(context.Background(), wid, rid, false, 0)
 	var events []enumspb.EventType
 	for iter.HasNext() {
@@ -1517,7 +1517,7 @@ func (s *clientIntegrationSuite) assertHistory(wid, rid string, expected []enums
 	s.Equal(expected, events)
 }
 
-func (s *clientIntegrationSuite) TestBatchSignal() {
+func (s *clientFunctionalSuite) TestBatchSignal() {
 
 	type myData struct {
 		Stuff  string
@@ -1571,7 +1571,7 @@ func (s *clientIntegrationSuite) TestBatchSignal() {
 	s.Equal(input1, returnedData)
 }
 
-func (s *clientIntegrationSuite) TestBatchReset() {
+func (s *clientFunctionalSuite) TestBatchReset() {
 
 	var count int32
 
@@ -1641,4 +1641,69 @@ func (s *clientIntegrationSuite) TestBatchReset() {
 	s.NoError(err)
 
 	s.Equal(1, result)
+}
+
+func (s *clientFunctionalSuite) Test_FinishWorkflowWithDeferredCommands() {
+	activityFn := func(ctx context.Context) error {
+		return nil
+	}
+
+	childWorkflowFn := func(ctx workflow.Context) error {
+		return nil
+	}
+
+	workflowFn := func(ctx workflow.Context) error {
+		ao := workflow.ActivityOptions{
+			StartToCloseTimeout: 10 * time.Second,
+		}
+		ctx = workflow.WithActivityOptions(ctx, ao)
+		defer workflow.ExecuteActivity(ctx, activityFn)
+
+		childID := "child_workflow"
+		cwo := workflow.ChildWorkflowOptions{
+			WorkflowID:         childID,
+			WorkflowRunTimeout: 10 * time.Second,
+			TaskQueue:          s.taskQueue,
+		}
+		ctx = workflow.WithChildOptions(ctx, cwo)
+		defer workflow.ExecuteChildWorkflow(ctx, childWorkflowFn)
+		workflow.NewTimer(ctx, time.Second)
+		return nil
+	}
+
+	s.worker.RegisterWorkflow(workflowFn)
+	s.worker.RegisterWorkflow(childWorkflowFn)
+	s.worker.RegisterActivity(activityFn)
+
+	id := "functional-test-finish-workflow-with-deffered-commands"
+	workflowOptions := sdkclient.StartWorkflowOptions{
+		ID:                 id,
+		TaskQueue:          s.taskQueue,
+		WorkflowRunTimeout: 10 * time.Second,
+	}
+
+	ctx := context.Background()
+	workflowRun, err := s.sdkClient.ExecuteWorkflow(ctx, workflowOptions, workflowFn)
+	if err != nil {
+		s.Logger.Fatal("Start workflow failed with err", tag.Error(err))
+	}
+
+	s.NotNil(workflowRun)
+	s.True(workflowRun.GetRunID() != "")
+
+	err = workflowRun.Get(ctx, nil)
+	s.NoError(err)
+
+	// verify event sequence
+	expectedHistory := []enumspb.EventType{
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED,
+		enumspb.EVENT_TYPE_WORKFLOW_TASK_COMPLETED,
+		enumspb.EVENT_TYPE_TIMER_STARTED,
+		enumspb.EVENT_TYPE_START_CHILD_WORKFLOW_EXECUTION_INITIATED,
+		enumspb.EVENT_TYPE_ACTIVITY_TASK_SCHEDULED,
+		enumspb.EVENT_TYPE_WORKFLOW_EXECUTION_COMPLETED,
+	}
+	s.assertHistory(id, workflowRun.GetRunID(), expectedHistory)
 }
