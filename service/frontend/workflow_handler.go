@@ -133,6 +133,16 @@ type (
 	}
 )
 
+// PollNexusTaskQueue implements Handler.
+func (*WorkflowHandler) PollNexusTaskQueue(context.Context, *workflowservice.PollNexusTaskQueueRequest) (*workflowservice.PollNexusTaskQueueResponse, error) {
+	panic("unimplemented")
+}
+
+// RespondNexusTaskCompleted implements Handler.
+func (*WorkflowHandler) RespondNexusTaskCompleted(context.Context, *workflowservice.RespondNexusTaskCompletedRequest) (*workflowservice.RespondNexusTaskCompletedResponse, error) {
+	panic("unimplemented")
+}
+
 // NewWorkflowHandler creates a gRPC handler for workflowservice
 func NewWorkflowHandler(
 	config *Config,
