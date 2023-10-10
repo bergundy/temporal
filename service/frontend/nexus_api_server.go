@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/nexus-rpc/sdk-go/nexus"
+	"go.temporal.io/sdk/client"
 	"go.temporal.io/server/api/matchingservice/v1"
 	"go.temporal.io/server/common/config"
 	"go.temporal.io/server/common/log"
@@ -37,8 +38,10 @@ type NexusAPIServer struct {
 	nexusHandler      http.Handler
 	serviceRegistry   persistence.IncomingServiceRegistry
 	namespaceRegistry namespace.Registry
-	listener          net.Listener
-	stopped           chan struct{}
+	// TODO: eventually this will go directly to history, it's here temporarily for the POC
+	workflowClient client.Client
+	listener       net.Listener
+	stopped        chan struct{}
 }
 
 // NewNexusAPIServer creates a [NexusAPIServer].
@@ -81,12 +84,19 @@ func NewNexusAPIServer(
 			listener = tls.NewListener(listener, tlsConfig)
 		}
 	}
+	// TODO: handle error
+	grpcAddr := tcpAddrRef.IP.String()
+	workflowClient, _ := client.NewLazyClient(client.Options{
+		HostPort:  fmt.Sprintf("%s:%d", grpcAddr, rpcConfig.GRPCPort),
+		Namespace: "default",
+	})
 
 	s := &NexusAPIServer{
 		listener:          listener,
 		logger:            logger,
 		serviceRegistry:   serviceRegistry,
 		namespaceRegistry: namespaceRegistry,
+		workflowClient:    workflowClient,
 		stopped:           make(chan struct{}),
 	}
 
@@ -157,6 +167,20 @@ func (h *NexusAPIServer) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		tag.NewStringTag("http-method", r.Method),
 		tag.NewAnyTag("http-url", r.URL),
 	)
+
+	// TODO: ..
+	if r.URL.Path == "/system/callback" {
+		// TODO: actual input
+		err := h.workflowClient.SignalWorkflow(r.Context(), r.URL.Query().Get("workflow_id"), "", r.URL.Query().Get("signal_name"), map[string]any{})
+		fmt.Println("signal workflow", r.URL.String(), err)
+		if err != nil {
+			h.logger.Error("failed to signal workflow", tag.Error(err))
+			w.WriteHeader(http.StatusInternalServerError)
+		} else {
+			w.WriteHeader(http.StatusOK)
+		}
+		return
+	}
 
 	if service := h.serviceRegistry.MatchURL(r.URL); service != nil {
 		namespace, err := h.namespaceRegistry.GetNamespace(namespace.Name(service.NamespaceName))
