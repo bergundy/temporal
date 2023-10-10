@@ -161,6 +161,13 @@ message WorkflowExecutionInfo {
 
     // index of update IDs and pointers to associated history events.
     map<string, temporal.server.api.update.v1.UpdateInfo> update_infos = 79;
+
+    repeated Callback callbacks = 80;
+}
+
+// TODO: this probably shouldn't be here
+message Callback {
+    string url = 1;
 }
 
 message ExecutionStats {
@@ -199,8 +206,14 @@ message TransferTaskInfo {
         // by some other task, so this task doesn't need to worry about it.
         bool can_skip_visibility_archival = 1;
     }
+
+    message NexusTaskDetails {
+        Callback callback = 1;
+    }
+
     oneof task_details {
         CloseExecutionTaskDetails close_execution_task_details = 16;
+        NexusTaskDetails nexus_task_details = 17;
     }
 }
 
@@ -366,4 +379,3 @@ message Checksum {
     temporal.server.api.enums.v1.ChecksumFlavor flavor = 2;
     bytes value = 3;
 }
-

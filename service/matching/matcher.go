@@ -27,6 +27,7 @@ package matching
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"sync"
 	"time"
@@ -216,6 +217,47 @@ func (tm *TaskMatcher) OfferQuery(ctx context.Context, task *internalTask) (*mat
 			return nil, nil
 		case token := <-fwdrTokenC:
 			resp, err := tm.fwdr.ForwardQueryTask(ctx, task)
+			token.release()
+			if err == nil {
+				return resp, nil
+			}
+			if err == errForwarderSlowDown {
+				// if we are rate limited, try only local match for the
+				// remainder of the context timeout left
+				fwdrTokenC = nil
+				continue
+			}
+			return nil, err
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+}
+
+// TODO
+func (tm *TaskMatcher) OfferNexusTask(ctx context.Context, task *internalTask) (*matchingservice.ProcessNexusTaskResponse, error) {
+	fmt.Println("AAAAAAAAAA", "offer", task.nexus.request)
+	select {
+	case tm.taskC <- task:
+		fmt.Println("AAAAAAAAAA", "pushed to local top")
+		<-task.responseC
+		return nil, nil
+	default:
+	}
+
+	fmt.Println("AAAAAAAAAA", "acquire token")
+	fwdrTokenC := tm.fwdrAddReqTokenC()
+
+	for {
+		fmt.Println("AAAAAAAAAA", "loop")
+		select {
+		case tm.taskC <- task:
+			fmt.Println("AAAAAAAAAA", "pushed to local")
+			<-task.responseC
+			return nil, nil
+		case token := <-fwdrTokenC:
+			fmt.Println("AAAAAAAAAA", "forward")
+			resp, err := tm.fwdr.ForwardNexusTask(ctx, task)
 			token.release()
 			if err == nil {
 				return resp, nil

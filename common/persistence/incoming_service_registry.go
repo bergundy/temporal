@@ -36,9 +36,10 @@ import (
 
 // TODO: protobuf?
 type Service struct {
-	// Base URL for this service.
-	BaseURL string
+	// Name of this service - used for URL resolution.
+	Name string
 	// Name of the namespace this service is bound to.
+	// TODO: probably want to use namespace ID here.
 	NamespaceName string
 	// Task queue name this service is bound to.
 	TaskQueue string
@@ -63,6 +64,12 @@ type IncomingServiceRegistry interface {
 type InMemoryWIPIncomingServiceRegistry struct {
 	lock     sync.RWMutex
 	services map[string]*Service
+}
+
+func NewInMemoryWIPIncomingServiceRegistry() *InMemoryWIPIncomingServiceRegistry {
+	return &InMemoryWIPIncomingServiceRegistry{
+		services: make(map[string]*Service),
+	}
 }
 
 var _ IncomingServiceRegistry = (*InMemoryWIPIncomingServiceRegistry)(nil)
@@ -105,7 +112,7 @@ func (r *InMemoryWIPIncomingServiceRegistry) RemoveService(ctx context.Context, 
 func (r *InMemoryWIPIncomingServiceRegistry) UpsertService(ctx context.Context, service *Service) error {
 	r.lock.Lock()
 	defer r.lock.Unlock()
-	r.services[service.BaseURL] = service
+	r.services[service.Name] = service
 	return nil
 }
 
@@ -114,7 +121,7 @@ func (r *InMemoryWIPIncomingServiceRegistry) MatchURL(u *url.URL) *Service {
 	r.lock.RLock()
 	defer r.lock.RUnlock()
 	for _, service := range r.services {
-		if strings.HasPrefix(u.Path, service.BaseURL) {
+		if strings.HasPrefix(u.Path, "/"+service.Name) {
 			return service
 		}
 	}

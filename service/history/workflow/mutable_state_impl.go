@@ -267,6 +267,8 @@ func NewMutableState(
 		StartTime:        timestamp.TimePtr(startTime),
 		VersionHistories: versionhistory.NewVersionHistories(&historyspb.VersionHistory{}),
 		ExecutionStats:   &persistencespb.ExecutionStats{HistorySize: 0},
+
+		Callbacks: []*persistencespb.Callback{},
 	}
 	s.approximateSize += s.executionInfo.Size()
 	s.executionState = &persistencespb.WorkflowExecutionState{State: enumsspb.WORKFLOW_EXECUTION_STATE_CREATED,
@@ -1672,6 +1674,7 @@ func (ms *MutableStateImpl) addWorkflowExecutionStartedEventForContinueAsNew(
 		SearchAttributes:         command.SearchAttributes,
 		// No need to request eager execution here (for now)
 		RequestEagerExecution: false,
+		CallbackUrl:           "", // TODO
 	}
 
 	enums.SetDefaultContinueAsNewInitiator(&command.Initiator)
@@ -1833,6 +1836,11 @@ func (ms *MutableStateImpl) ReplicateWorkflowExecutionStartedEvent(
 	ms.executionInfo.WorkflowRunTimeout = event.GetWorkflowRunTimeout()
 	ms.executionInfo.WorkflowExecutionTimeout = event.GetWorkflowExecutionTimeout()
 	ms.executionInfo.DefaultWorkflowTaskTimeout = event.GetWorkflowTaskTimeout()
+	callbackUrl := startEvent.GetWorkflowExecutionStartedEventAttributes().GetCallbackUrl()
+	if callbackUrl != "" {
+		// Append in case there are callbacks carries over from previous run in chain
+		ms.executionInfo.Callbacks = append(ms.executionInfo.Callbacks, &persistencespb.Callback{Url: callbackUrl})
+	}
 
 	if err := ms.UpdateWorkflowStateStatus(
 		enumsspb.WORKFLOW_EXECUTION_STATE_CREATED,

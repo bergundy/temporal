@@ -5,6 +5,7 @@
     - 'core::0191::java-outer-classname'
     - 'core::0191::java-multiple-files'
     - 'core::0191::java-package'
+    - 'core::0140::uri'
 
 - included_paths:
     - '**/message.proto'

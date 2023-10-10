@@ -22,19 +22,61 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-package common
+package tasks
 
 import (
-	tokenspb "go.temporal.io/server/api/token/v1"
+	"time"
+
+	enumsspb "go.temporal.io/server/api/enums/v1"
+	persistencepb "go.temporal.io/server/api/persistence/v1"
+	"go.temporal.io/server/common/definition"
 )
 
+var _ Task = (*NexusTask)(nil)
+
 type (
-	// TaskTokenSerializer serializes task tokens
-	TaskTokenSerializer interface {
-		Serialize(token *tokenspb.Task) ([]byte, error)
-		Deserialize(data []byte) (*tokenspb.Task, error)
-		// TODO: rename so it can be used for nexus tasks too
-		SerializeQueryTaskToken(token *tokenspb.QueryTask) ([]byte, error)
-		DeserializeQueryTaskToken(data []byte) (*tokenspb.QueryTask, error)
+	NexusTask struct {
+		definition.WorkflowKey
+		VisibilityTimestamp time.Time
+		TaskID              int64
+		Version             int64
+		// TODO: support initiating nexus calls not just callbacks
+		Callback *persistencepb.Callback
 	}
 )
+
+func (a *NexusTask) GetKey() Key {
+	return NewImmediateKey(a.TaskID)
+}
+
+func (a *NexusTask) GetVersion() int64 {
+	return a.Version
+}
+
+func (a *NexusTask) SetVersion(version int64) {
+	a.Version = version
+}
+
+func (a *NexusTask) GetTaskID() int64 {
+	return a.TaskID
+}
+
+func (a *NexusTask) SetTaskID(id int64) {
+	a.TaskID = id
+}
+
+func (a *NexusTask) GetVisibilityTime() time.Time {
+	return a.VisibilityTimestamp
+}
+
+func (a *NexusTask) SetVisibilityTime(timestamp time.Time) {
+	a.VisibilityTimestamp = timestamp
+}
+
+func (a *NexusTask) GetCategory() Category {
+	return CategoryTransfer
+}
+
+func (a *NexusTask) GetType() enumsspb.TaskType {
+	return enumsspb.TASK_TYPE_TRANSFER_ACTIVITY_TASK
+}

@@ -200,6 +200,7 @@ func (b *HistoryBuilder) AddWorkflowExecutionStartedEvent(
 		SearchAttributes:                req.SearchAttributes,
 		WorkflowId:                      req.WorkflowId,
 		SourceVersionStamp:              request.SourceVersionStamp,
+		CallbackUrl:                     req.CallbackUrl,
 	}
 	parentInfo := request.ParentExecutionInfo
 	if parentInfo != nil {

@@ -11,26 +11,34 @@ import (
 	"time"
 
 	"github.com/nexus-rpc/sdk-go/nexus"
+	"go.temporal.io/server/api/matchingservice/v1"
 	"go.temporal.io/server/common/config"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
 	"go.temporal.io/server/common/metrics"
+	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/persistence"
 	"go.temporal.io/server/common/rpc"
 	"go.temporal.io/server/common/rpc/encryption"
 )
 
-type nexusServiceContextKey struct{}
+type nexusContextKey struct{}
+
+type nexusContext struct {
+	service   *persistence.Service
+	namespace *namespace.Namespace
+}
 
 // NexusAPIServer is an HTTP API server that translates Nexus HTTP requests to Nexus tasks that are dispatched to
 // workers via matching.
 type NexusAPIServer struct {
-	server          http.Server
-	logger          log.Logger
-	nexusHandler    http.Handler
-	serviceRegistry persistence.IncomingServiceRegistry
-	listener        net.Listener
-	stopped         chan struct{}
+	server            http.Server
+	logger            log.Logger
+	nexusHandler      http.Handler
+	serviceRegistry   persistence.IncomingServiceRegistry
+	namespaceRegistry namespace.Registry
+	listener          net.Listener
+	stopped           chan struct{}
 }
 
 // NewNexusAPIServer creates a [NexusAPIServer].
@@ -41,6 +49,8 @@ func NewNexusAPIServer(
 	tlsConfigProvider encryption.TLSConfigProvider,
 	metricsHandler metrics.Handler,
 	serviceRegistry persistence.IncomingServiceRegistry,
+	namespaceRegistry namespace.Registry,
+	matchingClient matchingservice.MatchingServiceClient,
 	logger log.Logger,
 ) (*NexusAPIServer, error) {
 	// Create a TCP listener the same as the frontend one but with different port
@@ -73,14 +83,15 @@ func NewNexusAPIServer(
 	}
 
 	s := &NexusAPIServer{
-		listener:        listener,
-		logger:          logger,
-		serviceRegistry: serviceRegistry,
-		stopped:         make(chan struct{}),
+		listener:          listener,
+		logger:            logger,
+		serviceRegistry:   serviceRegistry,
+		namespaceRegistry: namespaceRegistry,
+		stopped:           make(chan struct{}),
 	}
 
 	handler := nexus.NewHTTPHandler(nexus.HandlerOptions{
-		Handler:          &nexusHandler{logger: logger},
+		Handler:          &nexusHandler{logger: logger, matchingClient: matchingClient},
 		GetResultTimeout: serviceConfig.KeepAliveMaxConnectionIdle(),
 		Logger:           log.NewSlogLogger(logger),
 	})
@@ -148,9 +159,17 @@ func (h *NexusAPIServer) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	)
 
 	if service := h.serviceRegistry.MatchURL(r.URL); service != nil {
+		namespace, err := h.namespaceRegistry.GetNamespace(namespace.Name(service.NamespaceName))
+		if err != nil {
+			h.logger.Error("failed to get namespace by name", tag.Error(err), tag.WorkflowNamespace(service.NamespaceName))
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
 		// TODO: histogram
-		r = r.WithContext(context.WithValue(r.Context(), nexusServiceContextKey{}, service))
-		http.StripPrefix(service.BaseURL, h.nexusHandler).ServeHTTP(w, r)
+		// TODO: escape service name
+		r = r.WithContext(context.WithValue(r.Context(), nexusContextKey{}, nexusContext{service: service, namespace: namespace}))
+		http.StripPrefix("/"+service.Name, h.nexusHandler).ServeHTTP(w, r)
 		return
 	}
 	failure := nexus.Failure{Message: "not found"}

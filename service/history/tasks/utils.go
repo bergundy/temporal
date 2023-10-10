@@ -92,6 +92,8 @@ func GetTransferTaskEventID(
 		eventID = task.InitiatedEventID
 	case *ResetWorkflowTask:
 		eventID = common.FirstEventID
+	case *NexusTask:
+		// no-op (I think at least for completion callback)
 	case *FakeTask:
 		// no-op
 	default:

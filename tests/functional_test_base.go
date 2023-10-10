@@ -147,6 +147,7 @@ func (s *FunctionalTestBase) setupSuite(defaultClusterConfigFile string, options
 	}
 
 	s.namespace = s.randomizeStr("functional-test-namespace")
+	s.namespace = "default" // TODO
 	s.Require().NoError(s.registerNamespace(s.namespace, 24*time.Hour, enumspb.ARCHIVAL_STATE_DISABLED, "", enumspb.ARCHIVAL_STATE_DISABLED, ""))
 
 	s.foreignNamespace = s.randomizeStr("functional-foreign-test-namespace")

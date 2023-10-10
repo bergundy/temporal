@@ -25,6 +25,7 @@
 package frontend
 
 import (
+	"context"
 	"fmt"
 	"net"
 
@@ -659,7 +660,14 @@ func HTTPAPIServerProvider(
 }
 
 func IncomingServiceRegistryProvider() persistence.IncomingServiceRegistry {
-	return nil
+	reg := persistence.NewInMemoryWIPIncomingServiceRegistry()
+	reg.UpsertService(context.TODO(), &persistence.Service{
+		Name:          "foo",
+		NamespaceName: "default",
+		TaskQueue:     "my-task-queue",
+		Metadata:      make(map[string]any),
+	})
+	return reg
 }
 
 // NexusAPIServerProvider provides an Nexus API server if port and registry are enabled or nil otherwise.
@@ -672,9 +680,11 @@ func NexusAPIServerProvider(
 	grpcServerOptions GrpcServerOptions,
 	metricsHandler metrics.Handler,
 	logger log.Logger,
-	registry persistence.IncomingServiceRegistry,
+	namespaceRegistry namespace.Registry,
+	serviceRegistry persistence.IncomingServiceRegistry,
+	matchingClient resource.MatchingClient,
 ) (*NexusAPIServer, error) {
-	if registry == nil {
+	if serviceRegistry == nil {
 		return nil, nil
 	}
 	// If the service is not the frontend service, Nexus API is disabled
@@ -693,7 +703,9 @@ func NexusAPIServerProvider(
 		grpcListener,
 		tlsConfigProvider,
 		metricsHandler,
-		registry,
+		serviceRegistry,
+		namespaceRegistry,
+		matchingClient,
 		logger,
 	)
 }

@@ -134,13 +134,149 @@ type (
 )
 
 // PollNexusTaskQueue implements Handler.
-func (*WorkflowHandler) PollNexusTaskQueue(context.Context, *workflowservice.PollNexusTaskQueueRequest) (*workflowservice.PollNexusTaskQueueResponse, error) {
-	panic("unimplemented")
+func (wh *WorkflowHandler) PollNexusTaskQueue(ctx context.Context, request *workflowservice.PollNexusTaskQueueRequest) (response *workflowservice.PollNexusTaskQueueResponse, retError error) {
+	defer log.CapturePanic(wh.logger, &retError)
+	if request == nil {
+		return nil, errRequestNotSet
+	}
+
+	wh.logger.Debug("Received PollWorkflowTaskQueue")
+	if err := common.ValidateLongPollContextTimeout(
+		ctx,
+		"PollWorkflowTaskQueue",
+		wh.throttledLogger,
+	); err != nil {
+		return nil, err
+	}
+
+	if len(request.GetIdentity()) > wh.config.MaxIDLengthLimit() {
+		return nil, errIdentityTooLong
+	}
+
+	namespaceName := namespace.Name(request.GetNamespace())
+	// if err := wh.validateVersioningInfo(request.Namespace, request.WorkerVersionCapabilities, request.TaskQueue); err != nil {
+	// 	return nil, err
+	// }
+
+	if err := wh.validateTaskQueue(request.TaskQueue, namespaceName); err != nil {
+		return nil, err
+	}
+
+	namespaceID, err := wh.namespaceRegistry.GetNamespaceID(namespaceName)
+	if err != nil {
+		return nil, err
+	}
+
+	if contextNearDeadline(ctx, longPollTailRoom) {
+		return &workflowservice.PollNexusTaskQueueResponse{}, nil
+	}
+
+	callTime := time.Now().UTC()
+	pollerID := uuid.New()
+
+	matchingResponse, err := wh.matchingClient.PollNexusTaskQueue(ctx, &matchingservice.PollNexusTaskQueueRequest{
+		NamespaceId: namespaceID.String(),
+		PollerId:    pollerID,
+		Request:     request,
+	})
+	if err != nil {
+		contextWasCanceled := wh.cancelOutstandingPoll(ctx, namespaceID, enumspb.TASK_QUEUE_TYPE_ACTIVITY, request.TaskQueue, pollerID)
+		if contextWasCanceled {
+			// Clear error as we don't want to report context cancellation error to count against our SLA.
+			// It doesn't matter what to return here, client has already gone. But (nil,nil) is invalid gogo return pair.
+			return &workflowservice.PollNexusTaskQueueResponse{}, nil
+		}
+
+		// These errors are expected from some versioning situations. We should not log them, it'd be too noisy.
+		var newerBuild *serviceerror.NewerBuildExists      // expected when versioned poller is superceded
+		var failedPrecond *serviceerror.FailedPrecondition // expected when user data is disabled
+		if errors.As(err, &newerBuild) || errors.As(err, &failedPrecond) {
+			return nil, err
+		}
+
+		// For all other errors log an error and return it back to client.
+		ctxTimeout := "not-set"
+		ctxDeadline, ok := ctx.Deadline()
+		if ok {
+			ctxTimeout = ctxDeadline.Sub(callTime).String()
+		}
+		wh.logger.Error("Unable to call matching.PollNexusTaskQueue.",
+			tag.WorkflowTaskQueueName(request.GetTaskQueue().GetName()),
+			tag.Timeout(ctxTimeout),
+			tag.Error(err))
+
+		return nil, err
+	}
+
+	if matchingResponse.GetResponse() == nil {
+		return &workflowservice.PollNexusTaskQueueResponse{}, nil
+	}
+	return matchingResponse.GetResponse(), nil
 }
 
 // RespondNexusTaskCompleted implements Handler.
-func (*WorkflowHandler) RespondNexusTaskCompleted(context.Context, *workflowservice.RespondNexusTaskCompletedRequest) (*workflowservice.RespondNexusTaskCompletedResponse, error) {
-	panic("unimplemented")
+func (wh *WorkflowHandler) RespondNexusTaskCompleted(ctx context.Context, request *workflowservice.RespondNexusTaskCompletedRequest) (response *workflowservice.RespondNexusTaskCompletedResponse, retError error) {
+	defer log.CapturePanic(wh.logger, &retError)
+
+	if request == nil {
+		return nil, errRequestNotSet
+	}
+
+	tt, err := wh.tokenSerializer.DeserializeQueryTaskToken(request.GetTaskToken())
+	if err != nil {
+		return nil, err
+	}
+	if tt.GetTaskQueue() == "" || tt.GetTaskId() == "" {
+		return nil, errInvalidTaskToken
+	}
+	namespaceId := namespace.ID(tt.GetNamespaceId())
+	namespaceEntry, err := wh.namespaceRegistry.GetNamespaceByID(namespaceId)
+	if err != nil {
+		return nil, err
+	}
+	// TODO: seems like this should be validated for query and possibly other tasks but I may have missed something
+	if namespaceEntry.Name().String() != request.GetNamespace() {
+		return nil, errInvalidTaskToken
+	}
+
+	// TODO: consider skipping this if we already enforce the 4 MB request limit, this doesn't go into history so why not respond with it?
+	// sizeLimitError := wh.config.BlobSizeLimitError(namespaceEntry.Name().String())
+	// sizeLimitWarn := wh.config.BlobSizeLimitWarn(namespaceEntry.Name().String())
+
+	// if err := common.CheckEventBlobSizeLimit(
+	// 	request.GetResponse().Size(),
+	// 	sizeLimitWarn,
+	// 	sizeLimitError,
+	// 	namespaceId.String(),
+	// 	"",
+	// 	"",
+	// 	wh.metricsScope(ctx).WithTags(metrics.CommandTypeTag(enumspb.COMMAND_TYPE_UNSPECIFIED.String())),
+	// 	wh.throttledLogger,
+	// 	tag.BlobSizeViolationOperation("RespondNexusTaskCompleted"),
+	// ); err != nil {
+	// 	request = &workflowservice.RespondNexusTaskCompletedRequest{
+	// 		TaskToken:     request.TaskToken,
+	// 		Namespace: request.GetNamespace(),
+	// 		Identity: request.GetIdentity(),
+	// 		Response: &nexus.Response{}, // TODO
+	// 	}
+	// }
+
+	matchingRequest := &matchingservice.RespondNexusTaskCompletedRequest{
+		NamespaceId: namespaceId.String(),
+		TaskQueue: &taskqueuepb.TaskQueue{
+			Name: tt.GetTaskQueue(),
+			Kind: enumspb.TASK_QUEUE_KIND_NORMAL,
+		},
+		TaskId:  tt.GetTaskId(),
+		Request: request,
+	}
+
+	_, err = wh.matchingClient.RespondNexusTaskCompleted(ctx, matchingRequest)
+	if err != nil {
+		return nil, err
+	}
+	return &workflowservice.RespondNexusTaskCompletedResponse{}, nil
 }
 
 // NewWorkflowHandler creates a gRPC handler for workflowservice

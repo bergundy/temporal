@@ -164,6 +164,18 @@ func (r *TaskGeneratorImpl) GenerateWorkflowCloseTasks(
 		closeExecutionTask,
 	}
 
+	// TODO: do we care about delete after close?
+
+	for _, callback := range r.mutableState.GetExecutionInfo().Callbacks {
+		fmt.Println("AAAAAAAAAAAAAAAA append nexus task", callback)
+		closeTasks = append(closeTasks, &tasks.NexusTask{
+			WorkflowKey: r.mutableState.GetWorkflowKey(),
+			Version:     currentVersion,
+			// TaskID, VisibilityTimestamp is set by shard
+			Callback: callback,
+		})
+	}
+
 	// To avoid race condition between visibility close and delete tasks, visibility close task is not created here.
 	// Also, there is no reason to schedule history retention task if workflow executions in about to be deleted.
 	// This will also save one call to visibility storage and one timer task creation.

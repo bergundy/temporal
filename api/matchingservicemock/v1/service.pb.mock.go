@@ -280,6 +280,26 @@ func (mr *MockMatchingServiceClientMockRecorder) PollActivityTaskQueue(ctx, in i
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PollActivityTaskQueue", reflect.TypeOf((*MockMatchingServiceClient)(nil).PollActivityTaskQueue), varargs...)
 }
 
+// PollNexusTaskQueue mocks base method.
+func (m *MockMatchingServiceClient) PollNexusTaskQueue(ctx context.Context, in *matchingservice.PollNexusTaskQueueRequest, opts ...grpc.CallOption) (*matchingservice.PollNexusTaskQueueResponse, error) {
+	m.ctrl.T.Helper()
+	varargs := []interface{}{ctx, in}
+	for _, a := range opts {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "PollNexusTaskQueue", varargs...)
+	ret0, _ := ret[0].(*matchingservice.PollNexusTaskQueueResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// PollNexusTaskQueue indicates an expected call of PollNexusTaskQueue.
+func (mr *MockMatchingServiceClientMockRecorder) PollNexusTaskQueue(ctx, in interface{}, opts ...interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]interface{}{ctx, in}, opts...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PollNexusTaskQueue", reflect.TypeOf((*MockMatchingServiceClient)(nil).PollNexusTaskQueue), varargs...)
+}
+
 // PollWorkflowTaskQueue mocks base method.
 func (m *MockMatchingServiceClient) PollWorkflowTaskQueue(ctx context.Context, in *matchingservice.PollWorkflowTaskQueueRequest, opts ...grpc.CallOption) (*matchingservice.PollWorkflowTaskQueueResponse, error) {
 	m.ctrl.T.Helper()
@@ -298,6 +318,26 @@ func (mr *MockMatchingServiceClientMockRecorder) PollWorkflowTaskQueue(ctx, in i
 	mr.mock.ctrl.T.Helper()
 	varargs := append([]interface{}{ctx, in}, opts...)
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PollWorkflowTaskQueue", reflect.TypeOf((*MockMatchingServiceClient)(nil).PollWorkflowTaskQueue), varargs...)
+}
+
+// ProcessNexusTask mocks base method.
+func (m *MockMatchingServiceClient) ProcessNexusTask(ctx context.Context, in *matchingservice.ProcessNexusTaskRequest, opts ...grpc.CallOption) (*matchingservice.ProcessNexusTaskResponse, error) {
+	m.ctrl.T.Helper()
+	varargs := []interface{}{ctx, in}
+	for _, a := range opts {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "ProcessNexusTask", varargs...)
+	ret0, _ := ret[0].(*matchingservice.ProcessNexusTaskResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ProcessNexusTask indicates an expected call of ProcessNexusTask.
+func (mr *MockMatchingServiceClientMockRecorder) ProcessNexusTask(ctx, in interface{}, opts ...interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]interface{}{ctx, in}, opts...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ProcessNexusTask", reflect.TypeOf((*MockMatchingServiceClient)(nil).ProcessNexusTask), varargs...)
 }
 
 // QueryWorkflow mocks base method.
@@ -338,6 +378,26 @@ func (mr *MockMatchingServiceClientMockRecorder) ReplicateTaskQueueUserData(ctx,
 	mr.mock.ctrl.T.Helper()
 	varargs := append([]interface{}{ctx, in}, opts...)
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReplicateTaskQueueUserData", reflect.TypeOf((*MockMatchingServiceClient)(nil).ReplicateTaskQueueUserData), varargs...)
+}
+
+// RespondNexusTaskCompleted mocks base method.
+func (m *MockMatchingServiceClient) RespondNexusTaskCompleted(ctx context.Context, in *matchingservice.RespondNexusTaskCompletedRequest, opts ...grpc.CallOption) (*matchingservice.RespondNexusTaskCompletedResponse, error) {
+	m.ctrl.T.Helper()
+	varargs := []interface{}{ctx, in}
+	for _, a := range opts {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "RespondNexusTaskCompleted", varargs...)
+	ret0, _ := ret[0].(*matchingservice.RespondNexusTaskCompletedResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RespondNexusTaskCompleted indicates an expected call of RespondNexusTaskCompleted.
+func (mr *MockMatchingServiceClientMockRecorder) RespondNexusTaskCompleted(ctx, in interface{}, opts ...interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]interface{}{ctx, in}, opts...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RespondNexusTaskCompleted", reflect.TypeOf((*MockMatchingServiceClient)(nil).RespondNexusTaskCompleted), varargs...)
 }
 
 // RespondQueryTaskCompleted mocks base method.
@@ -588,6 +648,21 @@ func (mr *MockMatchingServiceServerMockRecorder) PollActivityTaskQueue(arg0, arg
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PollActivityTaskQueue", reflect.TypeOf((*MockMatchingServiceServer)(nil).PollActivityTaskQueue), arg0, arg1)
 }
 
+// PollNexusTaskQueue mocks base method.
+func (m *MockMatchingServiceServer) PollNexusTaskQueue(arg0 context.Context, arg1 *matchingservice.PollNexusTaskQueueRequest) (*matchingservice.PollNexusTaskQueueResponse, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PollNexusTaskQueue", arg0, arg1)
+	ret0, _ := ret[0].(*matchingservice.PollNexusTaskQueueResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// PollNexusTaskQueue indicates an expected call of PollNexusTaskQueue.
+func (mr *MockMatchingServiceServerMockRecorder) PollNexusTaskQueue(arg0, arg1 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PollNexusTaskQueue", reflect.TypeOf((*MockMatchingServiceServer)(nil).PollNexusTaskQueue), arg0, arg1)
+}
+
 // PollWorkflowTaskQueue mocks base method.
 func (m *MockMatchingServiceServer) PollWorkflowTaskQueue(arg0 context.Context, arg1 *matchingservice.PollWorkflowTaskQueueRequest) (*matchingservice.PollWorkflowTaskQueueResponse, error) {
 	m.ctrl.T.Helper()
@@ -601,6 +676,21 @@ func (m *MockMatchingServiceServer) PollWorkflowTaskQueue(arg0 context.Context, 
 func (mr *MockMatchingServiceServerMockRecorder) PollWorkflowTaskQueue(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PollWorkflowTaskQueue", reflect.TypeOf((*MockMatchingServiceServer)(nil).PollWorkflowTaskQueue), arg0, arg1)
+}
+
+// ProcessNexusTask mocks base method.
+func (m *MockMatchingServiceServer) ProcessNexusTask(arg0 context.Context, arg1 *matchingservice.ProcessNexusTaskRequest) (*matchingservice.ProcessNexusTaskResponse, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ProcessNexusTask", arg0, arg1)
+	ret0, _ := ret[0].(*matchingservice.ProcessNexusTaskResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ProcessNexusTask indicates an expected call of ProcessNexusTask.
+func (mr *MockMatchingServiceServerMockRecorder) ProcessNexusTask(arg0, arg1 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ProcessNexusTask", reflect.TypeOf((*MockMatchingServiceServer)(nil).ProcessNexusTask), arg0, arg1)
 }
 
 // QueryWorkflow mocks base method.
@@ -631,6 +721,21 @@ func (m *MockMatchingServiceServer) ReplicateTaskQueueUserData(arg0 context.Cont
 func (mr *MockMatchingServiceServerMockRecorder) ReplicateTaskQueueUserData(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReplicateTaskQueueUserData", reflect.TypeOf((*MockMatchingServiceServer)(nil).ReplicateTaskQueueUserData), arg0, arg1)
+}
+
+// RespondNexusTaskCompleted mocks base method.
+func (m *MockMatchingServiceServer) RespondNexusTaskCompleted(arg0 context.Context, arg1 *matchingservice.RespondNexusTaskCompletedRequest) (*matchingservice.RespondNexusTaskCompletedResponse, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RespondNexusTaskCompleted", arg0, arg1)
+	ret0, _ := ret[0].(*matchingservice.RespondNexusTaskCompletedResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// RespondNexusTaskCompleted indicates an expected call of RespondNexusTaskCompleted.
+func (mr *MockMatchingServiceServerMockRecorder) RespondNexusTaskCompleted(arg0, arg1 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RespondNexusTaskCompleted", reflect.TypeOf((*MockMatchingServiceServer)(nil).RespondNexusTaskCompleted), arg0, arg1)
 }
 
 // RespondQueryTaskCompleted mocks base method.

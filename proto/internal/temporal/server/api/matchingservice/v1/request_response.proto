@@ -41,6 +41,7 @@ import "temporal/server/api/persistence/v1/task_queues.proto";
 import "temporal/server/api/taskqueue/v1/message.proto";
 
 import "temporal/api/workflowservice/v1/request_response.proto";
+import "temporal/api/nexus/v1/message.proto";
 
 message PollWorkflowTaskQueueRequest {
     string namespace_id = 1;
@@ -162,6 +163,42 @@ message RespondQueryTaskCompletedRequest {
 }
 
 message RespondQueryTaskCompletedResponse {
+
+}
+
+message ProcessNexusTaskRequest {
+    string namespace_id = 1;
+    temporal.api.taskqueue.v1.TaskQueue task_queue = 2;
+    temporal.api.nexus.v1.Request request = 3;
+    string forwarded_source = 4;
+    // How this task should be directed by matching. (Missing means the default
+    // for TaskVersionDirective, which is unversioned.)
+    temporal.server.api.taskqueue.v1.TaskVersionDirective version_directive = 5;
+}
+
+message ProcessNexusTaskResponse {
+    temporal.api.nexus.v1.Response response = 1;
+}
+
+message PollNexusTaskQueueRequest {
+    string namespace_id = 1;
+    string poller_id = 2;
+    temporal.api.workflowservice.v1.PollNexusTaskQueueRequest request = 3;
+    string forwarded_source = 4;
+}
+
+message PollNexusTaskQueueResponse {
+    temporal.api.workflowservice.v1.PollNexusTaskQueueResponse response = 1;
+}
+
+message RespondNexusTaskCompletedRequest {
+    string namespace_id = 1;
+    temporal.api.taskqueue.v1.TaskQueue task_queue = 2;
+    string task_id = 3;
+    temporal.api.workflowservice.v1.RespondNexusTaskCompletedRequest request = 4;
+}
+
+message RespondNexusTaskCompletedResponse {
 }
 
 message CancelOutstandingPollRequest {

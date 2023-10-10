@@ -25,9 +25,13 @@
 package history
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 
+	"github.com/nexus-rpc/sdk-go/nexus"
 	"github.com/pborman/uuid"
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
@@ -157,6 +161,8 @@ func (t *transferQueueActiveTaskExecutor) Execute(
 		err = t.processResetWorkflow(ctx, task)
 	case *tasks.DeleteExecutionTask:
 		err = t.processDeleteExecutionTask(ctx, task)
+	case *tasks.NexusTask:
+		err = t.processNexusTask(ctx, task)
 	default:
 		err = errUnknownTransferTask
 	}
@@ -409,6 +415,66 @@ func (t *transferQueueActiveTaskExecutor) processCloseExecution(
 		)
 	}
 	return err
+}
+
+func (t *transferQueueActiveTaskExecutor) processNexusTask(
+	ctx context.Context,
+	task *tasks.NexusTask,
+) (retError error) {
+	ctx, cancel := context.WithTimeout(ctx, taskTimeout)
+	defer cancel()
+
+	weContext, release, err := getWorkflowExecutionContextForTask(ctx, t.shardContext, t.cache, task)
+	if err != nil {
+		return err
+	}
+	defer func() { release(retError) }()
+
+	mutableState, err := loadMutableStateForTransferTask(ctx, t.shardContext, weContext, task, t.metricHandler, t.logger)
+	if err != nil {
+		return err
+	}
+	if mutableState == nil {
+		release(nil) // release(nil) so that the mutable state is not unloaded from cache
+		return consts.ErrWorkflowExecutionNotFound
+	}
+
+	ce, err := mutableState.GetCompletionEvent(ctx)
+	// TODO: check for terminated and other terminal events
+	// TODO: not sure which errors checks are appropriate
+	if err != nil {
+		return err
+	}
+	// TODO: do we need something like this?
+	// err = CheckTaskVersion(t.shardContext, t.logger, mutableState.GetNamespaceEntry(), ai.Version, task.Version, task)
+	// if err != nil {
+	// 	return err
+	// }
+
+	payloads := ce.GetWorkflowExecutionCompletedEventAttributes().GetResult()
+
+	// NOTE: do not access anything related mutable state after this lock release
+	// release the context lock since we no longer need mutable state and
+	// the rest of logic is making RPC call, which takes time.
+	release(nil)
+	// TODO: check which payload is relevant, figure out the encoding...
+	body := bytes.NewReader(payloads.GetPayloads()[0].Data)
+	completion := nexus.OperationCompletionSuccessful{Header: http.Header{"Content-Type": []string{"application/json"}}, Body: body}
+	req, err := nexus.NewCompletionHTTPRequest(ctx, task.Callback.GetUrl(), &completion)
+	if err != nil {
+		return err
+	}
+	response, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	// Ignore for now
+	io.ReadAll(response.Body)
+	if response.StatusCode >= 300 {
+		return fmt.Errorf("bad response")
+	}
+	return nil
 }
 
 func (t *transferQueueActiveTaskExecutor) processCancelExecution(

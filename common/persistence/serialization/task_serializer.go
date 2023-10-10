@@ -109,6 +109,8 @@ func (s *TaskSerializer) serializeTransferTask(
 		transferTask = s.transferResetTaskToProto(task)
 	case *tasks.DeleteExecutionTask:
 		transferTask = s.transferDeleteExecutionTaskToProto(task)
+	case *tasks.NexusTask:
+		transferTask = s.transferNexusTaskToProto(task)
 	default:
 		return commonpb.DataBlob{}, serviceerror.NewInternal(fmt.Sprintf("Unknown transfer task type: %v", task))
 	}
@@ -146,6 +148,8 @@ func (s *TaskSerializer) deserializeTransferTasks(
 		task = s.transferResetTaskFromProto(transferTask)
 	case enumsspb.TASK_TYPE_TRANSFER_DELETE_EXECUTION:
 		task = s.transferDeleteExecutionTaskFromProto(transferTask)
+	case enumsspb.TASK_TYPE_NEXUS_CALL:
+		task = s.transferNexusTaskFromProto(transferTask)
 	default:
 		return nil, serviceerror.NewInternal(fmt.Sprintf("Unknown transfer task type: %v", transferTask.TaskType))
 	}
@@ -641,6 +645,41 @@ func (s *TaskSerializer) transferDeleteExecutionTaskFromProto(
 		Version:             deleteExecutionTask.Version,
 		// Delete workflow task process stage is not persisted. It is only for in memory retries.
 		ProcessStage: tasks.DeleteWorkflowExecutionStageNone,
+	}
+}
+
+func (s *TaskSerializer) transferNexusTaskToProto(
+	task *tasks.NexusTask,
+) *persistencespb.TransferTaskInfo {
+	return &persistencespb.TransferTaskInfo{
+		NamespaceId: task.WorkflowKey.NamespaceID,
+		WorkflowId:  task.WorkflowKey.WorkflowID,
+		RunId:       task.WorkflowKey.RunID,
+		TaskType:    enumsspb.TASK_TYPE_NEXUS_CALL,
+		Version:     task.Version,
+		TaskId:      task.TaskID,
+		// VisibilityTime: timestamp.TimePtr(task.VisibilityTimestamp),
+		TaskDetails: &persistencespb.TransferTaskInfo_NexusTaskDetails_{
+			NexusTaskDetails: &persistencespb.TransferTaskInfo_NexusTaskDetails{
+				Callback: task.Callback,
+			},
+		},
+	}
+}
+
+func (s *TaskSerializer) transferNexusTaskFromProto(
+	task *persistencespb.TransferTaskInfo,
+) *tasks.NexusTask {
+	return &tasks.NexusTask{
+		WorkflowKey: definition.NewWorkflowKey(
+			task.NamespaceId,
+			task.WorkflowId,
+			task.RunId,
+		),
+		// // VisibilityTimestamp: *task.VisibilityTime,
+		TaskID:   task.TaskId,
+		Version:  task.Version,
+		Callback: task.GetNexusTaskDetails().GetCallback(),
 	}
 }
 

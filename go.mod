@@ -154,3 +154,5 @@ require (
 )
 
 replace go.temporal.io/api => ../api-go
+
+replace github.com/nexus-rpc/sdk-go => ../nexus-sdk-go
