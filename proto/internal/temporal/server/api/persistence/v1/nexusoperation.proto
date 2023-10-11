@@ -1,0 +1,136 @@
+syntax = "proto3";
+
+package temporal.server.api.persistence.v1;
+option go_package = "go.temporal.io/server/api/persistence/v1;persistence";
+
+import "google/protobuf/timestamp.proto";
+import "dependencies/gogoproto/gogo.proto";
+
+// Open questions, can the call state keep transitioning after a workflow has
+// completed? Doesn't seem to happen with child workflow. After workflow
+// completes, we won't know e.g. if cancellation is eventually processed.
+message StateMachineTransition {
+  // Event id of the correlating history event (only set if the workflow was
+  // open at transition time).
+  int64 event_id = 1;
+
+  // Id of the event batch containing the event_id above
+  int64 event_batch_id = 2;
+
+  // TODO: do we want to store this here?
+  // (-- api-linter: core::0142::time-field-names=disabled
+  //     aip.dev/not-precedent: it's okay not to end with _time if the name is
+  //     time. --)
+  google.protobuf.Timestamp time = 3 [ (gogoproto.stdtime) = true ];
+}
+
+// Initial call state. A successful request has yet to be recorded.
+message NexusOperationScheduled {
+  // Incremented every time before an attempt is made to transmit this call.
+  // Before? After? Before but without waiting for DB flush?
+  // Assuming at least once semantics, do we need to commit before?
+  int64 attempt = 1;
+}
+
+// Call was accepted by a handler, to be completed later via a callback.
+message NexusOperationStarted {
+  StateMachineTransition transition = 1;
+
+  // ID returned by a handler which can be used to reference this call (e.g. for
+  // issuing a cancellation).
+  string operation_id = 2;
+
+  // A reference to the previous state (scheduled).
+  NexusOperationScheduled previous_state = 3;
+}
+
+// Call has succeeded either by a handler responding inline or asynchrnously via
+// a callback.
+// Result is stored in history and can be looked up by the transition's event
+// information.
+message NexusOperationSucceeded {
+  StateMachineTransition transition = 1;
+
+  oneof previous_state {
+    // This will only be set if the previous state was scheduled marking that
+    // the handler responded inline.
+    NexusOperationScheduled scheduled = 2;
+    // This will only be set if the call ever transitioned to started state.
+    NexusOperationStarted started = 3;
+
+    NexusOperationCancelScheduled cancel_scheduled = 4;
+    NexusOperationCancelStarted cancel_started = 5;
+  }
+}
+
+// Call has failed either by a handler responding inline or asynchrnously via
+// a callback.
+// Result is stored in history and can be looked up by the transition's event
+// information.
+message NexusOperationFailed {
+  StateMachineTransition transition = 1;
+
+  oneof previous_state {
+    // This will only be set if the previous state was scheduled marking that
+    // the handler responded inline.
+    NexusOperationScheduled scheduled = 2;
+    // This will only be set if the call ever transitioned to started state.
+    NexusOperationStarted started = 3;
+
+    NexusOperationCancelScheduled cancel_scheduled = 4;
+    NexusOperationCancelStarted cancel_started = 5;
+  }
+}
+
+// The user specified timeout has expired. A handler may or may not have
+// received this call.
+message NexusOperationTimedOut {
+  StateMachineTransition transition = 1;
+
+  oneof previous_state {
+    // This will only be set if the previous state was scheduled marking that
+    // the handler responded inline.
+    NexusOperationScheduled scheduled = 2;
+    // This will only be set if the call ever transitioned to started state.
+    NexusOperationStarted started = 3;
+
+    NexusOperationCancelScheduled cancel_scheduled = 4;
+    NexusOperationCancelStarted cancel_started = 5;
+  }
+}
+
+// Call should be cancelled, a cancellation request should be sent to the
+// handler.
+// TODO: this is incomplete
+message NexusOperationCancelScheduled {
+  StateMachineTransition transition = 1;
+
+  oneof previous_state {
+    // This will only be set if the previous state was scheduled marking that
+    // the handler responded inline.
+    NexusOperationScheduled scheduled = 2;
+    // This will only be set if the call ever transitioned to started state.
+    NexusOperationStarted started = 3;
+  }
+}
+
+// A cancellation request has been sent to a handler which *should* eventually
+// process it. There's no guarantee that the operation will end up in cancelled
+// state.
+// TODO: this is incomplete
+message NexusOperationCancelStarted {
+  // Event id of the CallSucceeded event
+  int64 event_id = 1;
+
+  // Id of the event batch containing the event_id above
+  int64 event_batch_id = 2;
+
+  // TODO: do we want to store this here?
+  // (-- api-linter: core::0142::time-field-names=disabled
+  //     aip.dev/not-precedent: it's okay not to end with _time if the name is
+  //     time. --)
+  google.protobuf.Timestamp time = 3 [ (gogoproto.stdtime) = true ];
+
+  // This will only be set if the call ever transitioned to started state.
+  NexusOperationStarted started_state = 4;
+}
