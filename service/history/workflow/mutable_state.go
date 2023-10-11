@@ -106,6 +106,18 @@ type (
 	}
 
 	MutableState interface {
+		// TODO: move me
+		AddNexusOperationScheduledEvent(
+			workflowTaskCompletedEventID int64,
+			command *commandpb.ScheduleNexusOperationCommandAttributes,
+			bypassTaskGeneration bool,
+		) (*historypb.HistoryEvent, *persistencespb.NexusOperationState, error)
+		// TODO: move me
+		ReplicateNexusOperationScheduledEvent(
+			firstEventID int64,
+			event *historypb.HistoryEvent,
+		) (*persistencespb.NexusOperationState, error)
+
 		AddActivityTaskCancelRequestedEvent(int64, int64, string) (*historypb.HistoryEvent, *persistencespb.ActivityInfo, error)
 		AddActivityTaskCanceledEvent(int64, int64, int64, *commonpb.Payloads, string) (*historypb.HistoryEvent, error)
 		AddActivityTaskCompletedEvent(int64, int64, *workflowservice.RespondActivityTaskCompletedRequest) (*historypb.HistoryEvent, error)

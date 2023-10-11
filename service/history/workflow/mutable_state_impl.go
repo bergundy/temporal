@@ -4229,66 +4229,59 @@ func (ms *MutableStateImpl) ReplicateChildWorkflowExecutionTimedOutEvent(
 	return ms.DeletePendingChildExecution(initiatedID)
 }
 
-func (ms *MutableStateImpl) RetryActivity(
-	ai *persistencespb.ActivityInfo,
-	failure *failurepb.Failure,
-) (enumspb.RetryState, error) {
-
-	opTag := tag.WorkflowActionActivityTaskRetry
+func (ms *MutableStateImpl) AddNexusOperationScheduledEvent(
+	workflowTaskCompletedEventID int64,
+	command *commandpb.ScheduleNexusOperationCommandAttributes,
+	bypassTaskGeneration bool,
+) (*historypb.HistoryEvent, *persistencespb.NexusOperationState, error) {
+	opTag := tag.WorkflowActionNexusOperationScheduled
 	if err := ms.checkMutability(opTag); err != nil {
-		return enumspb.RETRY_STATE_INTERNAL_SERVER_ERROR, err
+		return nil, nil, err
 	}
 
-	if !ai.HasRetryPolicy {
-		return enumspb.RETRY_STATE_RETRY_POLICY_NOT_SET, nil
+	event := ms.hBuilder.AddNexusOperationScheduledEvent(workflowTaskCompletedEventID, command)
+	ai, err := ms.ReplicateNexusOperationScheduledEvent(workflowTaskCompletedEventID, event)
+	// TODO merge active & passive task generation (comment copied from AddActivityTaskScheduledEvent)
+	if !bypassTaskGeneration {
+		if err := ms.taskGenerator.GenerateActivityTasks(
+			event,
+		); err != nil {
+			return nil, nil, err
+		}
 	}
 
-	if ai.CancelRequested {
-		return enumspb.RETRY_STATE_CANCEL_REQUESTED, nil
+	return event, ai, err
+}
+
+func (ms *MutableStateImpl) ReplicateNexusOperationScheduledEvent(
+	firstEventID int64,
+	event *historypb.HistoryEvent,
+) (*persistencespb.NexusOperationState, error) {
+	attributes := event.GetNexusOperationScheduledEventAttributes()
+	scheduledEventId := event.GetEventId()
+
+	state := &persistencespb.NexusOperationState{
+		Version:               event.GetVersion(),
+		ScheduledEventId:      scheduledEventId,
+		ScheduledEventBatchId: firstEventID,
+		ScheduledTime:         event.GetEventTime(),
+		RequestId:             attributes.RequestId,
+		Service:               attributes.Service,
+		Operation:             attributes.Operation,
+		Timeout:               attributes.GetTimeout(),
+		State: &persistencespb.NexusOperationState_Scheduled{
+			Scheduled: &persistencespb.NexusOperationScheduled{
+				Attempt: 1,
+			},
+		},
 	}
 
-	if prev, ok := ms.pendingActivityInfoIDs[ai.ScheduledEventId]; ok {
-		ms.approximateSize -= prev.Size()
+	if ms.executionInfo.OperationStates == nil {
+		ms.executionInfo.OperationStates = make(map[int64]*persistencespb.NexusOperationState, 1)
 	}
-
-	now := ms.timeSource.Now()
-
-	backoffInterval, retryState := getBackoffInterval(
-		now,
-		ai.Attempt,
-		ai.RetryMaximumAttempts,
-		ai.RetryInitialInterval,
-		ai.RetryMaximumInterval,
-		ai.RetryExpirationTime,
-		ai.RetryBackoffCoefficient,
-		failure,
-		ai.RetryNonRetryableErrorTypes,
-	)
-	if retryState != enumspb.RETRY_STATE_IN_PROGRESS {
-		return retryState, nil
-	}
-
-	// a retry is needed, update activity info for next retry
-	ai.Version = ms.GetCurrentVersion()
-	ai.Attempt++
-	ai.ScheduledTime = timestamp.TimePtr(now.Add(backoffInterval)) // update to next schedule time
-	ai.StartedEventId = common.EmptyEventID
-	ai.RequestId = ""
-	ai.StartedTime = timestamp.TimePtr(time.Time{})
-	ai.TimerTaskStatus = TimerTaskStatusNone
-	ai.RetryLastWorkerIdentity = ai.StartedIdentity
-	ai.RetryLastFailure = ms.truncateRetryableActivityFailure(failure)
-
-	if err := ms.taskGenerator.GenerateActivityRetryTasks(
-		ai.ScheduledEventId,
-	); err != nil {
-		return enumspb.RETRY_STATE_INTERNAL_SERVER_ERROR, err
-	}
-
-	ms.updateActivityInfos[ai.ScheduledEventId] = ai
-	ms.syncActivityTasks[ai.ScheduledEventId] = struct{}{}
-	ms.approximateSize += ai.Size()
-	return enumspb.RETRY_STATE_IN_PROGRESS, nil
+	ms.executionInfo.OperationStates[scheduledEventId] = state
+	ms.writeEventToCache(event)
+	return state, nil
 }
 
 func (ms *MutableStateImpl) truncateRetryableActivityFailure(

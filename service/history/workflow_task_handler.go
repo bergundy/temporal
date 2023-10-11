@@ -1054,6 +1054,50 @@ func (handler *workflowTaskHandlerImpl) handleCommandStartChildWorkflow(
 	return err
 }
 
+func (handler *workflowTaskHandlerImpl) handleCommandScheduleNexusOperation(
+	_ context.Context,
+	attr *commandpb.ScheduleNexusOperationCommandAttributes,
+) error {
+	handler.metricsHandler.Counter(metrics.CommandTypeScheduleNexusOperationCounter.GetMetricName()).Record(1)
+
+	// TODO: check the outbound service registry that the service is registered on this namespace
+	// parentNamespaceEntry := handler.mutableState.GetNamespaceEntry()
+	// parentNamespaceID := parentNamespaceEntry.ID()
+	// parentNamespace := parentNamespaceEntry.Name()
+
+	if err := handler.validateCommandAttr(
+		func() (enumspb.WorkflowTaskFailedCause, error) {
+			return handler.attrValidator.validateScheduleNexusOperationAttributes(attr)
+		},
+	); err != nil || handler.stopProcessing {
+		return err
+	}
+
+	// TODO: may want to limit this a bit more to account for total size of request
+	if err := handler.sizeLimitChecker.checkIfPayloadSizeExceedsLimit(
+		metrics.CommandTypeTag(enumspb.COMMAND_TYPE_SCHEDULE_NEXUS_OPERATION.String()),
+		attr.GetInput().Size(),
+		"ScheduleNexusOperationCommandAttributes. Input exceeds size limit.",
+	); err != nil {
+		return handler.failWorkflow(enumspb.WORKFLOW_TASK_FAILED_CAUSE_BAD_START_CHILD_EXECUTION_ATTRIBUTES, err)
+	}
+
+	// TODO: pending operation limit
+	// if err := handler.sizeLimitChecker.checkIfNumChildWorkflowsExceedsLimit(); err != nil {
+	// 	return handler.failWorkflowTask(enumspb.WORKFLOW_TASK_FAILED_CAUSE_PENDING_CHILD_WORKFLOWS_LIMIT_EXCEEDED, err)
+	// }
+
+	requestID := uuid.New()
+	_, _, err = handler.mutableState.AddStartChildWorkflowExecutionInitiatedEvent(
+		handler.workflowTaskCompletedID, requestID, attr, targetNamespaceID,
+	)
+	if err == nil {
+		// Keep track of all child initiated commands in this workflow task to validate request cancel commands
+		handler.initiatedChildExecutionsInBatch[attr.GetWorkflowId()] = struct{}{}
+	}
+	return err
+}
+
 func (handler *workflowTaskHandlerImpl) handleCommandSignalExternalWorkflow(
 	_ context.Context,
 	attr *commandpb.SignalExternalWorkflowExecutionCommandAttributes,

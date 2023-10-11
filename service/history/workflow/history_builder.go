@@ -27,6 +27,7 @@ package workflow
 import (
 	"time"
 
+	"github.com/pborman/uuid"
 	commandpb "go.temporal.io/api/command/v1"
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
@@ -352,6 +353,28 @@ func (b *HistoryBuilder) AddActivityTaskScheduledEvent(
 			HeartbeatTimeout:             command.HeartbeatTimeout,
 			RetryPolicy:                  command.RetryPolicy,
 			UseCompatibleVersion:         command.UseCompatibleVersion,
+		},
+	}
+
+	event, _ = b.appendEvents(event)
+	return event
+}
+
+// TODO: move me
+func (b *HistoryBuilder) AddNexusOperationScheduledEvent(
+	workflowTaskCompletedEventID int64,
+	command *commandpb.ScheduleNexusOperationCommandAttributes,
+) *historypb.HistoryEvent {
+	event := b.createNewHistoryEvent(enumspb.EVENT_TYPE_NEXUS_OPERATION_SCHEDULED, b.timeSource.Now())
+	event.Attributes = &historypb.HistoryEvent_NexusOperationScheduledEventAttributes{
+		NexusOperationScheduledEventAttributes: &historypb.NexusOperationScheduledEventAttributes{
+			WorkflowTaskCompletedEventId: workflowTaskCompletedEventID,
+			Service:                      command.Service,
+			Operation:                    command.Operation,
+			Input:                        command.GetInput(),
+			Timeout:                      command.GetTimeout(),
+			Headers:                      command.GetHeaders(),
+			RequestId:                    uuid.New(),
 		},
 	}
 

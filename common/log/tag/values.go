@@ -94,6 +94,8 @@ var (
 	WorkflowActionExternalWorkflowSignalRequested = workflowAction("add-externalworkflow-signal-requested-event")
 	WorkflowActionExternalWorkflowSignalFailed    = workflowAction("add-externalworkflow-signal-failed-event")
 
+	WorkflowActionNexusOperationScheduled = workflowAction("add-nexusoperation-scheduled-event")
+
 	WorkflowActionUnknown = workflowAction("add-unknown-event")
 )
 

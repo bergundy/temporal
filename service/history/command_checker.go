@@ -786,6 +786,32 @@ func (v *commandAttrValidator) validateStartChildExecutionAttributes(
 	return enumspb.WORKFLOW_TASK_FAILED_CAUSE_UNSPECIFIED, nil
 }
 
+func (v *commandAttrValidator) validateScheduleNexusOperationAttributes(
+	attributes *commandpb.ScheduleNexusOperationCommandAttributes,
+) (enumspb.WorkflowTaskFailedCause, error) {
+	const failedCause = enumspb.WORKFLOW_TASK_FAILED_CAUSE_BAD_SCHEDULE_NEXUS_OPERATION_ATTRIBUTES
+
+	if attributes == nil {
+		return failedCause, serviceerror.NewInvalidArgument("ScheduleNexusOperationCommandAttributes is not set on command.")
+	}
+
+	if attributes.GetService() == "" {
+		return failedCause, serviceerror.NewInvalidArgument("Required field Service is not set on command.")
+	}
+
+	if attributes.GetOperation() == "" {
+		return failedCause, serviceerror.NewInvalidArgument("Required field Operation is not set on command.")
+	}
+
+	if err := timer.ValidateAndCapTimer(attributes.GetTimeout()); err != nil {
+		return failedCause, serviceerror.NewInvalidArgument(fmt.Sprintf("Invalid Timeout: %v.", err))
+	}
+
+	// TODO: header and payload validation
+
+	return enumspb.WORKFLOW_TASK_FAILED_CAUSE_UNSPECIFIED, nil
+}
+
 func (v *commandAttrValidator) validateTaskQueue(
 	taskQueue *taskqueuepb.TaskQueue,
 	defaultVal string,
@@ -919,7 +945,9 @@ func (v *commandAttrValidator) validateCommandSequence(
 			enumspb.COMMAND_TYPE_START_CHILD_WORKFLOW_EXECUTION,
 			enumspb.COMMAND_TYPE_UPSERT_WORKFLOW_SEARCH_ATTRIBUTES,
 			enumspb.COMMAND_TYPE_MODIFY_WORKFLOW_PROPERTIES,
-			enumspb.COMMAND_TYPE_PROTOCOL_MESSAGE:
+			enumspb.COMMAND_TYPE_PROTOCOL_MESSAGE,
+			enumspb.COMMAND_TYPE_SCHEDULE_NEXUS_OPERATION,
+			enumspb.COMMAND_TYPE_CANCEL_NEXUS_OPERATION: // not implemented
 			// noop
 		case enumspb.COMMAND_TYPE_CONTINUE_AS_NEW_WORKFLOW_EXECUTION,
 			enumspb.COMMAND_TYPE_COMPLETE_WORKFLOW_EXECUTION,
