@@ -651,18 +651,24 @@ func (s *TaskSerializer) transferDeleteExecutionTaskFromProto(
 func (s *TaskSerializer) transferNexusTaskToProto(
 	task *tasks.NexusTask,
 ) *persistencespb.TransferTaskInfo {
+	taskDetails := &persistencespb.TransferTaskInfo_NexusTaskDetails{}
+	if task.Callback != nil {
+		taskDetails.Callback = task.Callback
+	} else if task.StartCall != nil {
+		taskDetails.StartCall = task.StartCall
+	} else {
+		panic("invalid NexusTask, expected Callback or StartCall")
+	}
 	return &persistencespb.TransferTaskInfo{
-		NamespaceId: task.WorkflowKey.NamespaceID,
-		WorkflowId:  task.WorkflowKey.WorkflowID,
-		RunId:       task.WorkflowKey.RunID,
-		TaskType:    enumsspb.TASK_TYPE_NEXUS_CALL,
-		Version:     task.Version,
-		TaskId:      task.TaskID,
-		// VisibilityTime: timestamp.TimePtr(task.VisibilityTimestamp),
+		NamespaceId:    task.WorkflowKey.NamespaceID,
+		WorkflowId:     task.WorkflowKey.WorkflowID,
+		RunId:          task.WorkflowKey.RunID,
+		TaskType:       enumsspb.TASK_TYPE_NEXUS_CALL,
+		Version:        task.Version,
+		TaskId:         task.TaskID,
+		VisibilityTime: timestamp.TimePtr(task.VisibilityTimestamp),
 		TaskDetails: &persistencespb.TransferTaskInfo_NexusTaskDetails_{
-			NexusTaskDetails: &persistencespb.TransferTaskInfo_NexusTaskDetails{
-				Callback: task.Callback,
-			},
+			NexusTaskDetails: taskDetails,
 		},
 	}
 }
@@ -676,10 +682,11 @@ func (s *TaskSerializer) transferNexusTaskFromProto(
 			task.WorkflowId,
 			task.RunId,
 		),
-		// // VisibilityTimestamp: *task.VisibilityTime,
-		TaskID:   task.TaskId,
-		Version:  task.Version,
-		Callback: task.GetNexusTaskDetails().GetCallback(),
+		VisibilityTimestamp: *task.VisibilityTime,
+		TaskID:              task.TaskId,
+		Version:             task.Version,
+		Callback:            task.GetNexusTaskDetails().GetCallback(),
+		StartCall:           task.GetNexusTaskDetails().GetStartCall(),
 	}
 }
 

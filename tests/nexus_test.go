@@ -73,3 +73,47 @@ func (s *clientFunctionalSuite) TestNexusStartOperation() {
 	s.Require().Equal(response.Header.Get("Content-Type"), "application/json")
 	s.Require().Equal("\"ok\"", string(body))
 }
+
+func (s *clientFunctionalSuite) TestNexusStartOperationFromWorkflow() {
+	ctx, cancel := context.WithTimeout(NewContext(), time.Second*5)
+	defer cancel()
+
+	go func() {
+		res, err := s.engine.PollNexusTaskQueue(ctx, &workflowservice.PollNexusTaskQueueRequest{
+			Namespace: s.namespace,
+			Identity:  "test",
+			TaskQueue: &taskqueuepb.TaskQueue{Name: "my-task-queue", Kind: enumspb.TASK_QUEUE_KIND_NORMAL},
+		})
+		s.Require().NoError(err)
+		if len(res.TaskToken) == 0 {
+			fmt.Println("AAAAAAAA", "empty poll")
+			return
+		}
+
+		fmt.Println("AAAAAAAAAAAAAAAAAA", res)
+		res2, err := s.engine.RespondNexusTaskCompleted(ctx, &workflowservice.RespondNexusTaskCompletedRequest{
+			Namespace: s.namespace,
+			Identity:  "test",
+			TaskToken: res.TaskToken,
+			Response: &nexuspb.Response{
+				Variant: &nexuspb.Response_StartOperation{
+					StartOperation: &nexuspb.StartOperationResponse{
+						Variant: &nexuspb.StartOperationResponse_SyncSuccess{
+							SyncSuccess: &nexuspb.StartOperationResponseSync{
+								Payload: &nexuspb.Payload{
+									Headers: map[string]*nexuspb.HeaderValues{
+										"Content-Type": {Elements: []string{"application/json"}},
+									},
+									Body: []byte(`"ok"`),
+								},
+							},
+						},
+					},
+				},
+			},
+		})
+		s.Require().NoError(err)
+		fmt.Println("AAAAAAAAAAAAAAAAAA", "second res", res2)
+	}()
+	// TODO...
+}

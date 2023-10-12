@@ -40,7 +40,8 @@ type (
 		VisibilityTimestamp time.Time
 		TaskID              int64
 		Version             int64
-		// TODO: support initiating nexus calls not just callbacks
+		StartCall           *persistencepb.NexusStartCall
+		// TODO: CancelCall
 		Callback *persistencepb.Callback
 	}
 )

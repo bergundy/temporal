@@ -14,9 +14,9 @@ message StateMachineTransition {
   // open at transition time).
   int64 event_id = 1;
 
-  // Id of the event batch containing the event_id above
-  int64 event_batch_id = 2;
-
+  // TODO: we may want this as a reference later
+  // ID of the event batch containing the event_id above
+  // int64 event_batch_id = 2;
   // TODO: do we want to store this here?
   // (-- api-linter: core::0142::time-field-names=disabled
   //     aip.dev/not-precedent: it's okay not to end with _time if the name is

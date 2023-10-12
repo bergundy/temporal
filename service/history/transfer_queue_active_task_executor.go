@@ -30,12 +30,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 
 	"github.com/nexus-rpc/sdk-go/nexus"
 	"github.com/pborman/uuid"
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	historypb "go.temporal.io/api/history/v1"
+	nexuspb "go.temporal.io/api/nexus/v1"
 	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	workflowpb "go.temporal.io/api/workflow/v1"
@@ -424,6 +426,127 @@ func (t *transferQueueActiveTaskExecutor) processNexusTask(
 	ctx, cancel := context.WithTimeout(ctx, taskTimeout)
 	defer cancel()
 
+	if task.Callback != nil {
+		return t.processNexusCallbackTask(ctx, task)
+	}
+	if task.StartCall != nil {
+		return t.processNexusStartTask(ctx, task)
+	}
+	panic("unkown nexus task type, expected Callback or StartCall")
+}
+
+func (t *transferQueueActiveTaskExecutor) processNexusStartTask(
+	ctx context.Context,
+	task *tasks.NexusTask,
+) (retError error) {
+	weContext, release, err := getWorkflowExecutionContextForTask(ctx, t.shardContext, t.cache, task)
+	if err != nil {
+		return err
+	}
+	defer func() { release(retError) }()
+
+	mutableState, err := loadMutableStateForTransferTask(ctx, t.shardContext, weContext, task, t.metricHandler, t.logger)
+	if err != nil {
+		return err
+	}
+	if mutableState == nil {
+		release(nil) // release(nil) so that the mutable state is not unloaded from cache
+		return consts.ErrWorkflowExecutionNotFound
+	}
+
+	ev, err := mutableState.GetNexusOperationScheduledEvent(ctx, task.StartCall.ScheduledEventId)
+	// TODO: check for terminated and other terminal events
+	// TODO: not sure which errors checks are appropriate
+	if err != nil {
+		return err
+	}
+	// TODO: do we need something like this?
+	// err = CheckTaskVersion(t.shardContext, t.logger, mutableState.GetNamespaceEntry(), ai.Version, task.Version, task)
+	// if err != nil {
+	// 	return err
+	// }
+
+	attrs := ev.GetNexusOperationScheduledEventAttributes()
+
+	// TODO: check which payload is relevant, figure out the encoding...
+	body := bytes.NewReader(attrs.Input.GetData())
+	u, err := url.Parse("http://localhost:7253/system/callback")
+	q := u.Query()
+	q.Add("namespace", mutableState.GetNamespaceEntry().Name().String())
+	q.Add("workflow_id", mutableState.GetExecutionInfo().GetWorkflowId())
+	q.Add("run_id", mutableState.GetExecutionInfo().GetBaseExecutionInfo().GetRunId())
+	q.Add("scheduled_event_id", fmt.Sprintf("%d", task.StartCall.ScheduledEventId))
+	u.RawQuery = q.Encode()
+	req := nexus.StartOperationOptions{
+		Operation:   attrs.Operation,
+		CallbackURL: u.String(),
+		RequestID:   attrs.RequestId,
+		// TODO: get this from the payload
+		Header: http.Header{"Content-Type": []string{"application/json"}},
+		Body:   body,
+	}
+	// NOTE: do not access anything related mutable state after this lock release
+	// release the context lock since we no longer need mutable state and
+	// the rest of logic is making RPC call, which takes time.
+	release(nil)
+	client, err := nexus.NewClient(nexus.ClientOptions{
+		ServiceBaseURL: "http://localhost:7253/foo/",
+	})
+	if err != nil {
+		return err
+	}
+	result, err := client.StartOperation(ctx, req)
+	if err != nil {
+		// TODO: handle operation failed and 4xx vs. 5xx errors
+		return err
+	}
+	if response := result.Successful; response != nil {
+		fmt.Println("AAAAAAAAAAAAAAAAAAAAAA operation succeeded synchronously")
+		defer response.Body.Close()
+		// TODO: get headers
+		body, err := io.ReadAll(response.Body)
+		if err != nil {
+			return err
+		}
+		payload := &nexuspb.Payload{
+			Headers: map[string]*nexuspb.HeaderValues{"Content-Type": {Elements: []string{"application/json"}}},
+			Body:    body,
+		}
+		t.transitionNexusOperation(ctx, task, func(mutableState workflow.MutableState) error {
+			// TODO: when should bypassTaskGeneration be true?
+			_, err := mutableState.AddNexusOperationCompletedEvent(task.StartCall.ScheduledEventId, payload, false)
+			return err
+		})
+	} else if handle := result.Pending; handle != nil {
+		fmt.Println("AAAAAAAAAAAAAAAAAAAAAA operation started", handle.ID)
+
+		t.transitionNexusOperation(ctx, task, func(mutableState workflow.MutableState) error {
+			// TODO: when should bypassTaskGeneration be true?
+			_, err := mutableState.AddNexusOperationStartedEvent(task.StartCall.ScheduledEventId, handle.ID, false)
+			return err
+		})
+	}
+	return nil
+}
+
+func (t *transferQueueActiveTaskExecutor) transitionNexusOperation(
+	ctx context.Context,
+	task *tasks.NexusTask,
+	updateFunc func(mutableState workflow.MutableState) error,
+) (retError error) {
+	weContext, release, err := getWorkflowExecutionContextForTask(ctx, t.shardContext, t.cache, task)
+	if err != nil {
+		return err
+	}
+	defer func() { release(retError) }()
+
+	return t.updateWorkflowExecution(ctx, weContext, true, updateFunc)
+}
+
+func (t *transferQueueActiveTaskExecutor) processNexusCallbackTask(
+	ctx context.Context,
+	task *tasks.NexusTask,
+) (retError error) {
 	weContext, release, err := getWorkflowExecutionContextForTask(ctx, t.shardContext, t.cache, task)
 	if err != nil {
 		return err

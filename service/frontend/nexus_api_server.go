@@ -6,12 +6,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/nexus-rpc/sdk-go/nexus"
-	"go.temporal.io/sdk/client"
+	nexuspb "go.temporal.io/api/nexus/v1"
+	"go.temporal.io/server/api/historyservice/v1"
 	"go.temporal.io/server/api/matchingservice/v1"
 	"go.temporal.io/server/common/config"
 	"go.temporal.io/server/common/log"
@@ -38,10 +41,9 @@ type NexusAPIServer struct {
 	nexusHandler      http.Handler
 	serviceRegistry   persistence.IncomingServiceRegistry
 	namespaceRegistry namespace.Registry
-	// TODO: eventually this will go directly to history, it's here temporarily for the POC
-	workflowClient client.Client
-	listener       net.Listener
-	stopped        chan struct{}
+	historyClient     historyservice.HistoryServiceClient
+	listener          net.Listener
+	stopped           chan struct{}
 }
 
 // NewNexusAPIServer creates a [NexusAPIServer].
@@ -54,6 +56,7 @@ func NewNexusAPIServer(
 	serviceRegistry persistence.IncomingServiceRegistry,
 	namespaceRegistry namespace.Registry,
 	matchingClient matchingservice.MatchingServiceClient,
+	historyClient historyservice.HistoryServiceClient,
 	logger log.Logger,
 ) (*NexusAPIServer, error) {
 	// Create a TCP listener the same as the frontend one but with different port
@@ -84,19 +87,13 @@ func NewNexusAPIServer(
 			listener = tls.NewListener(listener, tlsConfig)
 		}
 	}
-	// TODO: handle error
-	grpcAddr := tcpAddrRef.IP.String()
-	workflowClient, _ := client.NewLazyClient(client.Options{
-		HostPort:  fmt.Sprintf("%s:%d", grpcAddr, rpcConfig.GRPCPort),
-		Namespace: "default",
-	})
 
 	s := &NexusAPIServer{
 		listener:          listener,
 		logger:            logger,
 		serviceRegistry:   serviceRegistry,
 		namespaceRegistry: namespaceRegistry,
-		workflowClient:    workflowClient,
+		historyClient:     historyClient,
 		stopped:           make(chan struct{}),
 	}
 
@@ -168,17 +165,44 @@ func (h *NexusAPIServer) serveHTTP(w http.ResponseWriter, r *http.Request) {
 		tag.NewAnyTag("http-url", r.URL),
 	)
 
-	// TODO: ..
+	// TODO: tidy this up, use the completion handler from the nexus SDK
 	if r.URL.Path == "/system/callback" {
-		// TODO: actual input
-		err := h.workflowClient.SignalWorkflow(r.Context(), r.URL.Query().Get("workflow_id"), "", r.URL.Query().Get("signal_name"), map[string]any{})
-		fmt.Println("signal workflow", r.URL.String(), err)
+		q := r.URL.Query()
+		namespaceName := q.Get("namespace")
+		// TODO: validations
+		workflowID := q.Get("workflow_id")
+		runID := q.Get("run_id")
+		scheduledEventIDStr := q.Get("scheduled_event_id")
+		scheduledEventID, err := strconv.ParseInt(scheduledEventIDStr, 10, 64)
 		if err != nil {
-			h.logger.Error("failed to signal workflow", tag.Error(err))
+			h.logger.Error("nexus callback: invalid scheduled_event_id", tag.WorkflowNamespace(namespaceName), tag.Error(err))
 			w.WriteHeader(http.StatusInternalServerError)
-		} else {
-			w.WriteHeader(http.StatusOK)
 		}
+		namespace, err := h.namespaceRegistry.GetNamespace(namespace.Name(namespaceName))
+		if err != nil {
+			h.logger.Error("nexus callback: failed to find namespace", tag.WorkflowNamespace(namespaceName), tag.Error(err))
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+		b, err := io.ReadAll(r.Body)
+		if err != nil {
+			h.logger.Error("nexus callback: failed to read request body", tag.WorkflowNamespace(namespaceName), tag.Error(err))
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+		_, err = h.historyClient.CompleteNexusOperation(r.Context(), &historyservice.CompleteNexusOperationRequest{
+			NamespaceId:      namespace.ID().String(),
+			WorkflowId:       workflowID,
+			RunId:            runID,
+			ScheduledEventId: scheduledEventID,
+			Payload: &nexuspb.Payload{
+				Headers: map[string]*nexuspb.HeaderValues{"Content-Type": &nexuspb.HeaderValues{Elements: []string{"application/json"}}},
+				Body:    b,
+			},
+		})
+		if err != nil {
+			h.logger.Error("nexus callback: failed to send completion to history service", tag.WorkflowNamespace(namespaceName), tag.Error(err))
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+		w.WriteHeader(http.StatusOK)
 		return
 	}
 

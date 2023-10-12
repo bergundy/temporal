@@ -35,6 +35,7 @@ import (
 	"go.temporal.io/api/serviceerror"
 
 	enumsspb "go.temporal.io/server/api/enums/v1"
+	"go.temporal.io/server/api/persistence/v1"
 	"go.temporal.io/server/common/archiver"
 	"go.temporal.io/server/common/backoff"
 	"go.temporal.io/server/common/namespace"
@@ -91,6 +92,8 @@ type (
 		// these 2 APIs should only be called when mutable state transaction is being closed
 		GenerateActivityTimerTasks() error
 		GenerateUserTimerTasks() error
+
+		GenerateNexusTasks(event *historypb.HistoryEvent) error
 
 		// replication tasks
 		GenerateHistoryReplicationTasks(
@@ -434,6 +437,28 @@ func (r *TaskGeneratorImpl) GenerateActivityTasks(
 		TaskQueue:        activityInfo.TaskQueue,
 		ScheduledEventID: activityInfo.ScheduledEventId,
 		Version:          activityInfo.Version,
+	})
+
+	return nil
+}
+
+func (r *TaskGeneratorImpl) GenerateNexusTasks(
+	event *historypb.HistoryEvent,
+) error {
+	scheduledEventID := event.GetEventId()
+	operationState, ok := r.mutableState.GetExecutionInfo().OperationStates[scheduledEventID]
+	if !ok {
+		return serviceerror.NewInternal(fmt.Sprintf("it could be a bug, cannot get pending operation state: %v", scheduledEventID))
+	}
+
+	r.mutableState.AddTasks(&tasks.NexusTask{
+		// TaskID, VisibilityTimestamp is set by shard
+		WorkflowKey: r.mutableState.GetWorkflowKey(),
+		Version:     operationState.Version,
+		StartCall: &persistence.NexusStartCall{
+			Service:          event.GetNexusOperationScheduledEventAttributes().Service,
+			ScheduledEventId: scheduledEventID,
+		},
 	})
 
 	return nil

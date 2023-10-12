@@ -172,6 +172,14 @@ message Callback {
     string url = 1;
 }
 
+// TODO: this probably shouldn't be here
+message NexusStartCall {
+    // Might not need the service here (thinking of using it for the per (source, service) transfer queue later, we'll
+    // see
+    string service = 1;
+    int64 scheduled_event_id = 2;
+}
+
 message ExecutionStats {
     int64 history_size = 1;
 }
@@ -211,6 +219,7 @@ message TransferTaskInfo {
 
     message NexusTaskDetails {
         Callback callback = 1;
+        NexusStartCall start_call = 2;
     }
 
     oneof task_details {

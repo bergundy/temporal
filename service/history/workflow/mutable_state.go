@@ -35,6 +35,7 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 	failurepb "go.temporal.io/api/failure/v1"
 	historypb "go.temporal.io/api/history/v1"
+	nexuspb "go.temporal.io/api/nexus/v1"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	updatepb "go.temporal.io/api/update/v1"
 	workflowpb "go.temporal.io/api/workflow/v1"
@@ -117,6 +118,19 @@ type (
 			firstEventID int64,
 			event *historypb.HistoryEvent,
 		) (*persistencespb.NexusOperationState, error)
+		AddNexusOperationStartedEvent(
+			scheduledEventID int64,
+			operationID string,
+			bypassTaskGeneration bool,
+		) (*historypb.HistoryEvent, error)
+		ReplicateNexusOperationStartedEvent(event *historypb.HistoryEvent) error
+		AddNexusOperationCompletedEvent(
+			scheduledEventID int64,
+			payload *nexuspb.Payload,
+			bypassTaskGeneration bool,
+		) (*historypb.HistoryEvent, error)
+
+		ReplicateNexusOperationCompletedEvent(event *historypb.HistoryEvent) error
 
 		AddActivityTaskCancelRequestedEvent(int64, int64, string) (*historypb.HistoryEvent, *persistencespb.ActivityInfo, error)
 		AddActivityTaskCanceledEvent(int64, int64, int64, *commonpb.Payloads, string) (*historypb.HistoryEvent, error)
@@ -183,6 +197,7 @@ type (
 		GetActivityInfoWithTimerHeartbeat(scheduledEventID int64) (*persistencespb.ActivityInfo, time.Time, bool)
 		GetActivityType(context.Context, *persistencespb.ActivityInfo) (*commonpb.ActivityType, error)
 		GetActivityScheduledEvent(context.Context, int64) (*historypb.HistoryEvent, error)
+		GetNexusOperationScheduledEvent(context.Context, int64) (*historypb.HistoryEvent, error)
 		GetRequesteCancelExternalInitiatedEvent(context.Context, int64) (*historypb.HistoryEvent, error)
 		GetChildExecutionInfo(int64) (*persistencespb.ChildExecutionInfo, bool)
 		GetChildExecutionInitiatedEvent(context.Context, int64) (*historypb.HistoryEvent, error)

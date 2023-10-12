@@ -54,6 +54,26 @@ func (c *clientImpl) CloseShard(
 	return response, nil
 }
 
+func (c *clientImpl) CompleteNexusOperation(
+	ctx context.Context,
+	request *historyservice.CompleteNexusOperationRequest,
+	opts ...grpc.CallOption,
+) (*historyservice.CompleteNexusOperationResponse, error) {
+	shardID := c.shardIDFromWorkflowID(request.NamespaceId, request.GetWorkflowId())
+	var response *historyservice.CompleteNexusOperationResponse
+	op := func(ctx context.Context, client historyservice.HistoryServiceClient) error {
+		var err error
+		ctx, cancel := c.createContext(ctx)
+		defer cancel()
+		response, err = client.CompleteNexusOperation(ctx, request, opts...)
+		return err
+	}
+	if err := c.executeWithRedirect(ctx, shardID, op); err != nil {
+		return nil, err
+	}
+	return response, nil
+}
+
 func (c *clientImpl) DeleteWorkflowExecution(
 	ctx context.Context,
 	request *historyservice.DeleteWorkflowExecutionRequest,

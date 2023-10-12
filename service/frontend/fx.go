@@ -683,6 +683,7 @@ func NexusAPIServerProvider(
 	namespaceRegistry namespace.Registry,
 	serviceRegistry persistence.IncomingServiceRegistry,
 	matchingClient resource.MatchingClient,
+	historyClient resource.HistoryClient,
 ) (*NexusAPIServer, error) {
 	if serviceRegistry == nil {
 		return nil, nil
@@ -706,6 +707,7 @@ func NexusAPIServerProvider(
 		serviceRegistry,
 		namespaceRegistry,
 		matchingClient,
+		historyClient,
 		logger,
 	)
 }

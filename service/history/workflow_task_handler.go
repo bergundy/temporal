@@ -261,6 +261,9 @@ func (handler *workflowTaskHandlerImpl) handleCommand(
 	case enumspb.COMMAND_TYPE_PROTOCOL_MESSAGE:
 		return nil, handler.handleCommandProtocolMessage(ctx, command.GetProtocolMessageCommandAttributes(), msgs)
 
+	case enumspb.COMMAND_TYPE_SCHEDULE_NEXUS_OPERATION:
+		return nil, handler.handleCommandScheduleNexusOperation(ctx, command.GetScheduleNexusOperationCommandAttributes())
+
 	default:
 		return nil, serviceerror.NewInvalidArgument(fmt.Sprintf("Unknown command type: %v", command.GetCommandType()))
 	}
@@ -1087,14 +1090,13 @@ func (handler *workflowTaskHandlerImpl) handleCommandScheduleNexusOperation(
 	// 	return handler.failWorkflowTask(enumspb.WORKFLOW_TASK_FAILED_CAUSE_PENDING_CHILD_WORKFLOWS_LIMIT_EXCEEDED, err)
 	// }
 
-	requestID := uuid.New()
-	_, _, err = handler.mutableState.AddStartChildWorkflowExecutionInitiatedEvent(
-		handler.workflowTaskCompletedID, requestID, attr, targetNamespaceID,
-	)
-	if err == nil {
-		// Keep track of all child initiated commands in this workflow task to validate request cancel commands
-		handler.initiatedChildExecutionsInBatch[attr.GetWorkflowId()] = struct{}{}
-	}
+	_, _, err := handler.mutableState.AddNexusOperationScheduledEvent(handler.workflowTaskCompletedID, attr, false)
+
+	// TODO: we don't need this
+	// if err == nil {
+	// 	// Keep track of all child initiated commands in this workflow task to validate request cancel commands
+	// 	handler.scheduledNexusOperations[attr.GetWorkflowId()] = struct{}{}
+	// }
 	return err
 }
 

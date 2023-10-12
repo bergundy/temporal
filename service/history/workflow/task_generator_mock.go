@@ -189,6 +189,20 @@ func (mr *MockTaskGeneratorMockRecorder) GenerateMigrationTasks() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GenerateMigrationTasks", reflect.TypeOf((*MockTaskGenerator)(nil).GenerateMigrationTasks))
 }
 
+// GenerateNexusTasks mocks base method.
+func (m *MockTaskGenerator) GenerateNexusTasks(event *history.HistoryEvent) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GenerateNexusTasks", event)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// GenerateNexusTasks indicates an expected call of GenerateNexusTasks.
+func (mr *MockTaskGeneratorMockRecorder) GenerateNexusTasks(event interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GenerateNexusTasks", reflect.TypeOf((*MockTaskGenerator)(nil).GenerateNexusTasks), event)
+}
+
 // GenerateRecordWorkflowStartedTasks mocks base method.
 func (m *MockTaskGenerator) GenerateRecordWorkflowStartedTasks(startEvent *history.HistoryEvent) error {
 	m.ctrl.T.Helper()
