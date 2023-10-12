@@ -25,7 +25,6 @@
 package frontend
 
 import (
-	"context"
 	"fmt"
 	"net"
 
@@ -553,6 +552,7 @@ func OperatorHandlerProvider(
 	clusterMetadataManager persistence.ClusterMetadataManager,
 	clusterMetadata cluster.Metadata,
 	clientFactory client.Factory,
+	incomingServiceRegistry persistence.IncomingServiceRegistry,
 ) *OperatorHandlerImpl {
 	args := NewOperatorHandlerImplArgs{
 		configuration,
@@ -568,6 +568,7 @@ func OperatorHandlerProvider(
 		clusterMetadataManager,
 		clusterMetadata,
 		clientFactory,
+		incomingServiceRegistry,
 	}
 	return NewOperatorHandlerImpl(args)
 }
@@ -660,14 +661,7 @@ func HTTPAPIServerProvider(
 }
 
 func IncomingServiceRegistryProvider() persistence.IncomingServiceRegistry {
-	reg := persistence.NewInMemoryWIPIncomingServiceRegistry()
-	reg.UpsertService(context.TODO(), &persistence.Service{
-		Name:          "foo",
-		NamespaceName: "default",
-		TaskQueue:     "my-task-queue",
-		Metadata:      make(map[string]any),
-	})
-	return reg
+	return persistence.NewInMemoryWIPIncomingServiceRegistry()
 }
 
 // NexusAPIServerProvider provides an Nexus API server if port and registry are enabled or nil otherwise.

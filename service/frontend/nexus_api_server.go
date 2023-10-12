@@ -194,7 +194,7 @@ func (h *NexusAPIServer) serveHTTP(w http.ResponseWriter, r *http.Request) {
 			RunId:            runID,
 			ScheduledEventId: scheduledEventID,
 			Payload: &nexuspb.Payload{
-				Headers: map[string]*nexuspb.HeaderValues{"Content-Type": &nexuspb.HeaderValues{Elements: []string{"application/json"}}},
+				Headers: map[string]*nexuspb.HeaderValues{"Content-Type": {Elements: []string{"application/json"}}},
 				Body:    b,
 			},
 		})
@@ -207,9 +207,9 @@ func (h *NexusAPIServer) serveHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if service := h.serviceRegistry.MatchURL(r.URL); service != nil {
-		namespace, err := h.namespaceRegistry.GetNamespace(namespace.Name(service.NamespaceName))
+		namespace, err := h.namespaceRegistry.GetNamespace(namespace.Name(service.Namespace))
 		if err != nil {
-			h.logger.Error("failed to get namespace by name", tag.Error(err), tag.WorkflowNamespace(service.NamespaceName))
+			h.logger.Error("failed to get namespace by name", tag.Error(err), tag.WorkflowNamespace(service.Namespace))
 			w.WriteHeader(http.StatusInternalServerError)
 			return
 		}

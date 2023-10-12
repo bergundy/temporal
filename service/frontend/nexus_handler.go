@@ -3,6 +3,7 @@ package frontend
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 
@@ -49,6 +50,7 @@ func (h *nexusHandler) StartOperation(ctx context.Context, request *nexus.StartO
 				},
 			},
 		})
+		fmt.Println("AAAAAAAAAAA post process", response, err)
 		if err != nil {
 			return nil, err
 		}

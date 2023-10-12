@@ -482,6 +482,24 @@ func (d *namespaceHandlerImpl) UpdateNamespace(
 			}
 			info.State = updatedInfo.State
 		}
+		for _, u := range updatedInfo.OutgoingServiceUpdates {
+			configurationChanged = true
+			switch u := u.Variant.(type) {
+			case *namespacepb.OutgoingServiceUpdate_CreateOrUpdateService_:
+				if info.OutgoingNexusRegistry == nil {
+					info.OutgoingNexusRegistry = make(map[string]*namespacepb.NexusOutgoingService, 1)
+				}
+				// TODO: validate name and base URL
+				info.OutgoingNexusRegistry[u.CreateOrUpdateService.GetName()] = &namespacepb.NexusOutgoingService{
+					BaseUrl: u.CreateOrUpdateService.GetBaseUrl(),
+				}
+			case *namespacepb.OutgoingServiceUpdate_DeleteService_:
+				// TODO: validate name is not empty
+				delete(info.OutgoingNexusRegistry, u.DeleteService.GetName())
+			default:
+				panic("not implemented")
+			}
+		}
 	}
 	if updateRequest.Config != nil {
 		updatedConfig := updateRequest.Config

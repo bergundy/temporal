@@ -100,6 +100,8 @@ func (s *operatorHandlerSuite) SetupTest() {
 		s.mockResource.GetClusterMetadataManager(),
 		s.mockResource.GetClusterMetadata(),
 		s.mockResource.GetClientFactory(),
+		// TODO: replace me
+		persistence.NewInMemoryWIPIncomingServiceRegistry(),
 	}
 	s.handler = NewOperatorHandlerImpl(args)
 	s.handler.Start()

@@ -73,37 +73,81 @@ type (
 	OperatorHandlerImpl struct {
 		status int32
 
-		logger                 log.Logger
-		config                 *Config
-		esClient               esclient.Client
-		sdkClientFactory       sdk.ClientFactory
-		metricsHandler         metrics.Handler
-		visibilityMgr          manager.VisibilityManager
-		saProvider             searchattribute.Provider
-		saManager              searchattribute.Manager
-		healthServer           *health.Server
-		historyClient          resource.HistoryClient
-		clusterMetadataManager persistence.ClusterMetadataManager
-		clusterMetadata        clustermetadata.Metadata
-		clientFactory          svc.Factory
+		logger                  log.Logger
+		config                  *Config
+		esClient                esclient.Client
+		sdkClientFactory        sdk.ClientFactory
+		metricsHandler          metrics.Handler
+		visibilityMgr           manager.VisibilityManager
+		saProvider              searchattribute.Provider
+		saManager               searchattribute.Manager
+		healthServer            *health.Server
+		historyClient           resource.HistoryClient
+		clusterMetadataManager  persistence.ClusterMetadataManager
+		clusterMetadata         clustermetadata.Metadata
+		clientFactory           svc.Factory
+		incomingServiceRegistry persistence.IncomingServiceRegistry
 	}
 
 	NewOperatorHandlerImplArgs struct {
-		config                 *Config
-		EsClient               esclient.Client
-		Logger                 log.Logger
-		sdkClientFactory       sdk.ClientFactory
-		MetricsHandler         metrics.Handler
-		VisibilityMgr          manager.VisibilityManager
-		SaProvider             searchattribute.Provider
-		SaManager              searchattribute.Manager
-		healthServer           *health.Server
-		historyClient          resource.HistoryClient
-		clusterMetadataManager persistence.ClusterMetadataManager
-		clusterMetadata        clustermetadata.Metadata
-		clientFactory          svc.Factory
+		config                  *Config
+		EsClient                esclient.Client
+		Logger                  log.Logger
+		sdkClientFactory        sdk.ClientFactory
+		MetricsHandler          metrics.Handler
+		VisibilityMgr           manager.VisibilityManager
+		SaProvider              searchattribute.Provider
+		SaManager               searchattribute.Manager
+		healthServer            *health.Server
+		historyClient           resource.HistoryClient
+		clusterMetadataManager  persistence.ClusterMetadataManager
+		clusterMetadata         clustermetadata.Metadata
+		clientFactory           svc.Factory
+		incomingServiceRegistry persistence.IncomingServiceRegistry
 	}
 )
+
+// CreateOrUpdateNexusIncomingService implements OperatorHandler.
+func (h *OperatorHandlerImpl) CreateOrUpdateNexusIncomingService(ctx context.Context, req *operatorservice.CreateOrUpdateNexusIncomingServiceRequest) (*operatorservice.CreateOrUpdateNexusIncomingServiceResponse, error) {
+	// TODO: validate
+	err := h.incomingServiceRegistry.UpsertService(ctx, req.GetNexusIncomingService())
+	if err != nil {
+		return nil, err
+	}
+	// TODO: version from DB
+	return &operatorservice.CreateOrUpdateNexusIncomingServiceResponse{
+		Version: req.NexusIncomingService.GetVersion() + 1,
+	}, nil
+}
+
+// DeleteNexusIncomingService implements OperatorHandler.
+func (h *OperatorHandlerImpl) DeleteNexusIncomingService(ctx context.Context, req *operatorservice.DeleteNexusIncomingServiceRequest) (*operatorservice.DeleteNexusIncomingServiceResponse, error) {
+	err := h.incomingServiceRegistry.RemoveService(ctx, req.GetName())
+	if err != nil {
+		return nil, err
+	}
+	return &operatorservice.DeleteNexusIncomingServiceResponse{}, nil
+}
+
+// GetNexusIncomingService implements OperatorHandler.
+func (h *OperatorHandlerImpl) GetNexusIncomingService(ctx context.Context, req *operatorservice.GetNexusIncomingServiceRequest) (*operatorservice.GetNexusIncomingServiceResponse, error) {
+	// TODO: validate name
+	svc, err := h.incomingServiceRegistry.GetService(ctx, req.GetName())
+	if err != nil {
+		return nil, err
+	}
+	return &operatorservice.GetNexusIncomingServiceResponse{NexusIncomingService: svc}, nil
+}
+
+// ListNexusIncomingServices implements OperatorHandler.
+func (h *OperatorHandlerImpl) ListNexusIncomingServices(ctx context.Context, req *operatorservice.ListNexusIncomingServicesRequest) (*operatorservice.ListNexusIncomingServicesResponse, error) {
+	// TODO: pagination
+	svcs, err := h.incomingServiceRegistry.ListServices(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &operatorservice.ListNexusIncomingServicesResponse{Services: svcs}, nil
+}
 
 // NewOperatorHandlerImpl creates a gRPC handler for operatorservice
 func NewOperatorHandlerImpl(
@@ -111,20 +155,21 @@ func NewOperatorHandlerImpl(
 ) *OperatorHandlerImpl {
 
 	handler := &OperatorHandlerImpl{
-		logger:                 args.Logger,
-		status:                 common.DaemonStatusInitialized,
-		config:                 args.config,
-		esClient:               args.EsClient,
-		sdkClientFactory:       args.sdkClientFactory,
-		metricsHandler:         args.MetricsHandler,
-		visibilityMgr:          args.VisibilityMgr,
-		saProvider:             args.SaProvider,
-		saManager:              args.SaManager,
-		healthServer:           args.healthServer,
-		historyClient:          args.historyClient,
-		clusterMetadataManager: args.clusterMetadataManager,
-		clusterMetadata:        args.clusterMetadata,
-		clientFactory:          args.clientFactory,
+		logger:                  args.Logger,
+		status:                  common.DaemonStatusInitialized,
+		config:                  args.config,
+		esClient:                args.EsClient,
+		sdkClientFactory:        args.sdkClientFactory,
+		metricsHandler:          args.MetricsHandler,
+		visibilityMgr:           args.VisibilityMgr,
+		saProvider:              args.SaProvider,
+		saManager:               args.SaManager,
+		healthServer:            args.healthServer,
+		historyClient:           args.historyClient,
+		clusterMetadataManager:  args.clusterMetadataManager,
+		clusterMetadata:         args.clusterMetadata,
+		clientFactory:           args.clientFactory,
+		incomingServiceRegistry: args.incomingServiceRegistry,
 	}
 
 	return handler

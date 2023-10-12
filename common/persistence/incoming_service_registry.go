@@ -31,21 +31,12 @@ import (
 	"sync"
 
 	"github.com/gogo/status"
+	"go.temporal.io/api/operatorservice/v1"
 	"google.golang.org/grpc/codes"
 )
 
-// TODO: protobuf?
-type Service struct {
-	// Name of this service - used for URL resolution.
-	Name string
-	// Name of the namespace this service is bound to.
-	// TODO: probably want to use namespace ID here.
-	NamespaceName string
-	// Task queue name this service is bound to.
-	TaskQueue string
-	// Generic metadata added to this service.
-	Metadata map[string]any
-}
+// TODO: probably want to use namespace ID here.
+type Service = operatorservice.NexusIncomingService
 
 type IncomingServiceRegistry interface {
 	// MatchURL returns a non nil Service if the URL matches a registered service.

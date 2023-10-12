@@ -439,6 +439,17 @@ func (t *transferQueueActiveTaskExecutor) processNexusStartTask(
 	ctx context.Context,
 	task *tasks.NexusTask,
 ) (retError error) {
+	ns, err := t.registry.GetNamespaceByID(namespace.ID(task.NamespaceID))
+	if err != nil {
+		// TODO: how should this be handled?
+		return err
+	}
+	svc := ns.GetOutboundService(task.StartCall.Service)
+	if svc == nil {
+		// TODO: how should this be handled?
+		return fmt.Errorf("can't find outbound nexus service: %s (namespace: %s)", task.StartCall.Service, ns.Name())
+	}
+
 	weContext, release, err := getWorkflowExecutionContextForTask(ctx, t.shardContext, t.cache, task)
 	if err != nil {
 		return err
@@ -470,7 +481,8 @@ func (t *transferQueueActiveTaskExecutor) processNexusStartTask(
 
 	// TODO: check which payload is relevant, figure out the encoding...
 	body := bytes.NewReader(attrs.Input.GetData())
-	u, err := url.Parse("http://localhost:7253/system/callback")
+	// TODO: get the URL of the frontend service
+	u, _ := url.Parse("http://localhost:7253/system/callback")
 	q := u.Query()
 	q.Add("namespace", mutableState.GetNamespaceEntry().Name().String())
 	q.Add("workflow_id", mutableState.GetExecutionInfo().GetWorkflowId())
@@ -489,13 +501,15 @@ func (t *transferQueueActiveTaskExecutor) processNexusStartTask(
 	// release the context lock since we no longer need mutable state and
 	// the rest of logic is making RPC call, which takes time.
 	release(nil)
+
 	client, err := nexus.NewClient(nexus.ClientOptions{
-		ServiceBaseURL: "http://localhost:7253/foo/",
+		ServiceBaseURL: svc.GetBaseUrl(),
 	})
 	if err != nil {
 		return err
 	}
-	result, err := client.StartOperation(ctx, req)
+	tmpCtxDeleteMe := context.TODO()
+	result, err := client.StartOperation(tmpCtxDeleteMe, req)
 	if err != nil {
 		// TODO: handle operation failed and 4xx vs. 5xx errors
 		return err

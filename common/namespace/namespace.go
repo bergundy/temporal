@@ -306,6 +306,13 @@ func (ns *Namespace) CustomSearchAttributesMapper() CustomSearchAttributesMapper
 	return ns.customSearchAttributesMapper
 }
 
+func (ns *Namespace) GetOutboundService(serviceName string) *namespacepb.NexusOutgoingService {
+	if ns.info.OutgoingNexusRegistry == nil {
+		return nil
+	}
+	return ns.info.OutgoingNexusRegistry[serviceName]
+}
+
 // Error returns the reason associated with this bad binary.
 func (e BadBinaryError) Error() string {
 	return e.info.Reason

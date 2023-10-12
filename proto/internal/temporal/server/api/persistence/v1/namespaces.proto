@@ -49,6 +49,7 @@ message NamespaceInfo {
     string description = 4;
     string owner = 5;
     map<string, string> data = 6;
+    map<string, temporal.api.namespace.v1.NexusOutgoingService> outgoing_nexus_registry = 7;
 }
 
 message NamespaceConfig {
