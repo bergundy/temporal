@@ -508,8 +508,7 @@ func (t *transferQueueActiveTaskExecutor) processNexusStartTask(
 	if err != nil {
 		return err
 	}
-	tmpCtxDeleteMe := context.TODO()
-	result, err := client.StartOperation(tmpCtxDeleteMe, req)
+	result, err := client.StartOperation(ctx, req)
 	if err != nil {
 		// TODO: handle operation failed and 4xx vs. 5xx errors
 		return err
