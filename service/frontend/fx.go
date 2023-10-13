@@ -660,8 +660,8 @@ func HTTPAPIServerProvider(
 	)
 }
 
-func IncomingServiceRegistryProvider() persistence.IncomingServiceRegistry {
-	return persistence.NewInMemoryWIPIncomingServiceRegistry()
+func IncomingServiceRegistryProvider(clusterMetadataManager persistence.ClusterMetadataManager) persistence.IncomingServiceRegistry {
+	return persistence.NewHackyWIPIncomingServiceRegistry(clusterMetadataManager)
 }
 
 // NexusAPIServerProvider provides an Nexus API server if port and registry are enabled or nil otherwise.

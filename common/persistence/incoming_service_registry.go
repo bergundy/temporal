@@ -26,12 +26,14 @@ package persistence
 
 import (
 	"context"
+	"encoding/json"
 	"net/url"
 	"strings"
-	"sync"
 
 	"github.com/gogo/status"
 	"go.temporal.io/api/operatorservice/v1"
+
+	// clustermetadata "go.temporal.io/server/common/cluster"
 	"google.golang.org/grpc/codes"
 )
 
@@ -52,35 +54,88 @@ type IncomingServiceRegistry interface {
 }
 
 // TODO: replace with persisted registry
-type InMemoryWIPIncomingServiceRegistry struct {
-	lock     sync.RWMutex
-	services map[string]*Service
+type HackyWIPIncomingServiceRegistry struct {
+	clusterMetadataManager ClusterMetadataManager
+	// clusterMetadata        clustermetadata.Metadata
 }
 
-func NewInMemoryWIPIncomingServiceRegistry() *InMemoryWIPIncomingServiceRegistry {
-	return &InMemoryWIPIncomingServiceRegistry{
-		services: make(map[string]*Service),
+func NewHackyWIPIncomingServiceRegistry(clusterMetadataManager ClusterMetadataManager) *HackyWIPIncomingServiceRegistry {
+	return &HackyWIPIncomingServiceRegistry{
+		clusterMetadataManager: clusterMetadataManager,
 	}
 }
 
-var _ IncomingServiceRegistry = (*InMemoryWIPIncomingServiceRegistry)(nil)
+var _ IncomingServiceRegistry = (*HackyWIPIncomingServiceRegistry)(nil)
+
+func (r *HackyWIPIncomingServiceRegistry) load(ctx context.Context) (map[string]*Service, error) {
+	metadata, err := r.clusterMetadataManager.GetCurrentClusterMetadata(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var services map[string]*Service
+	serialized := metadata.Tags["service-registry"]
+	if serialized == "" {
+		services = make(map[string]*Service)
+	} else if err := json.Unmarshal([]byte(serialized), &services); err != nil {
+		return nil, err
+	}
+	return services, nil
+}
+
+func (r *HackyWIPIncomingServiceRegistry) update(ctx context.Context, updateFn func(map[string]*Service)) error {
+	metadata, err := r.clusterMetadataManager.GetCurrentClusterMetadata(ctx)
+	if err != nil {
+		return err
+	}
+	var services map[string]*Service
+
+	serialized := metadata.Tags["service-registry"]
+	if serialized == "" {
+		services = make(map[string]*Service)
+	} else if err := json.Unmarshal([]byte(serialized), &services); err != nil {
+		return err
+	}
+
+	updateFn(services)
+
+	b, err := json.Marshal(services)
+	if err != nil {
+		return err
+	}
+	if metadata.ClusterMetadata.Tags == nil {
+		metadata.ClusterMetadata.Tags = make(map[string]string, 1)
+	}
+
+	metadata.ClusterMetadata.Tags["service-registry"] = string(b)
+
+	_, err = r.clusterMetadataManager.SaveClusterMetadata(ctx, &SaveClusterMetadataRequest{
+		ClusterMetadata: metadata.ClusterMetadata,
+		Version:         metadata.Version,
+	})
+
+	return err
+}
 
 // GetService implements IncomingServiceRegistry.
-func (r *InMemoryWIPIncomingServiceRegistry) GetService(ctx context.Context, baseURL string) (*Service, error) {
-	r.lock.RLock()
-	defer r.lock.RUnlock()
-	if service, found := r.services[baseURL]; found {
+func (r *HackyWIPIncomingServiceRegistry) GetService(ctx context.Context, name string) (*Service, error) {
+	services, err := r.load(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if service, found := services[name]; found {
 		return service, nil
 	}
 	return nil, status.Errorf(codes.NotFound, "service not found")
 }
 
 // ListServices implements IncomingServiceRegistry.
-func (r *InMemoryWIPIncomingServiceRegistry) ListServices(context.Context) ([]*Service, error) {
-	r.lock.RLock()
-	defer r.lock.RUnlock()
-	values := make([]*Service, 0, len(r.services))
-	for _, v := range r.services {
+func (r *HackyWIPIncomingServiceRegistry) ListServices(ctx context.Context) ([]*Service, error) {
+	services, err := r.load(ctx)
+	if err != nil {
+		return nil, err
+	}
+	values := make([]*Service, 0, len(services))
+	for _, v := range services {
 		values = append(values, v)
 	}
 
@@ -88,30 +143,28 @@ func (r *InMemoryWIPIncomingServiceRegistry) ListServices(context.Context) ([]*S
 }
 
 // RemoveService implements IncomingServiceRegistry.
-func (r *InMemoryWIPIncomingServiceRegistry) RemoveService(ctx context.Context, baseURL string) error {
-	r.lock.Lock()
-	defer r.lock.Unlock()
-	if _, found := r.services[baseURL]; !found {
-		return status.Errorf(codes.NotFound, "service not found")
-	}
-
-	delete(r.services, baseURL)
-	return nil
+func (r *HackyWIPIncomingServiceRegistry) RemoveService(ctx context.Context, name string) error {
+	return r.update(ctx, func(services map[string]*Service) {
+		delete(services, name)
+	})
 }
 
 // UpsertService implements IncomingServiceRegistry.
-func (r *InMemoryWIPIncomingServiceRegistry) UpsertService(ctx context.Context, service *Service) error {
-	r.lock.Lock()
-	defer r.lock.Unlock()
-	r.services[service.Name] = service
-	return nil
+func (r *HackyWIPIncomingServiceRegistry) UpsertService(ctx context.Context, service *Service) error {
+	return r.update(ctx, func(services map[string]*Service) {
+		services[service.Name] = service
+	})
 }
 
 // MatchURL implements IncomingServiceRegistry.
-func (r *InMemoryWIPIncomingServiceRegistry) MatchURL(u *url.URL) *Service {
-	r.lock.RLock()
-	defer r.lock.RUnlock()
-	for _, service := range r.services {
+func (r *HackyWIPIncomingServiceRegistry) MatchURL(u *url.URL) *Service {
+	services, err := r.load(context.TODO())
+	if err != nil {
+		// TODO: this registry interface was written with the expectation that the services would be cached in memory.
+		// For the PoC we accept that it's okay to ignore this error.
+		return nil
+	}
+	for _, service := range services {
 		if strings.HasPrefix(u.Path, "/"+service.Name) {
 			return service
 		}
