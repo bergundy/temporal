@@ -258,6 +258,9 @@ const (
 	FrontendClientStartBatchOperationScope = "FrontendClientStartBatchOperation"
 	// FrontendClientStopBatchOperationScope tracks RPC calls to frontend service
 	FrontendClientStopBatchOperationScope = "FrontendClientStopBatchOperation"
+
+	FrontendClientPollNexusTaskQueueScope        = "FrontendClientPollNexusTaskQueue"
+	FrontendClientRespondNexusTaskCompletedScope = "FrontendClientRespondNexusTaskCompleted"
 )
 
 // History Client Operations
@@ -368,6 +371,7 @@ const (
 	HistoryClientGetReplicationMessagesScope = "HistoryClientGetReplicationMessages"
 	// HistoryClientStreamWorkflowReplicationMessagesScope tracks RPC calls to history service
 	HistoryClientStreamWorkflowReplicationMessagesScope = "HistoryClientStreamWorkflowReplicationMessages"
+	HistoryClientCompleteNexusOperationScope            = "HistoryClientCompleteNexusOperation"
 )
 
 // Matching Client Operations
@@ -406,6 +410,9 @@ const (
 	MatchingClientUpdateTaskQueueUserDataScope = "MatchingClientUpdateTaskQueueUserData"
 	// MatchingClientReplicateTaskQueueUserDataScope tracks RPC calls to matching service
 	MatchingClientReplicateTaskQueueUserDataScope = "MatchingClientReplicateTaskQueueUserData"
+	MatchingClientPollNexusTaskQueueScope         = "MatchingClientPollNexusTaskQueue"
+	MatchingClientProcessNexusTaskScope           = "MatchingClientProcessNexusTask"
+	MatchingClientRespondNexusTaskCompletedScope  = "MatchingClientRespondNexusTaskCompleted"
 )
 
 // Worker

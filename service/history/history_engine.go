@@ -384,7 +384,7 @@ func (e *historyEngineImpl) CompleteNexusOperation(ctx context.Context, request 
 			}, nil
 		},
 		nil,
-		e.shardContext,
+		e.shard,
 		e.workflowConsistencyChecker,
 	)
 	if err != nil {

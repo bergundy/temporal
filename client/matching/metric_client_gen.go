@@ -153,7 +153,7 @@ func (c *metricClient) PollNexusTaskQueue(
 	opts ...grpc.CallOption,
 ) (_ *matchingservice.PollNexusTaskQueueResponse, retError error) {
 
-	metricsHandler, startTime := c.startMetricsRecording(ctx, "MatchingClientPollNexusTaskQueue")
+	metricsHandler, startTime := c.startMetricsRecording(ctx, metrics.MatchingClientPollNexusTaskQueueScope)
 	defer func() {
 		c.finishMetricsRecording(metricsHandler, startTime, retError)
 	}()
@@ -167,7 +167,7 @@ func (c *metricClient) ProcessNexusTask(
 	opts ...grpc.CallOption,
 ) (_ *matchingservice.ProcessNexusTaskResponse, retError error) {
 
-	metricsHandler, startTime := c.startMetricsRecording(ctx, "MatchingClientProcessNexusTask")
+	metricsHandler, startTime := c.startMetricsRecording(ctx, metrics.MatchingClientProcessNexusTaskScope)
 	defer func() {
 		c.finishMetricsRecording(metricsHandler, startTime, retError)
 	}()
@@ -195,7 +195,7 @@ func (c *metricClient) RespondNexusTaskCompleted(
 	opts ...grpc.CallOption,
 ) (_ *matchingservice.RespondNexusTaskCompletedResponse, retError error) {
 
-	metricsHandler, startTime := c.startMetricsRecording(ctx, "MatchingClientRespondNexusTaskCompleted")
+	metricsHandler, startTime := c.startMetricsRecording(ctx, metrics.MatchingClientRespondNexusTaskCompletedScope)
 	defer func() {
 		c.finishMetricsRecording(metricsHandler, startTime, retError)
 	}()

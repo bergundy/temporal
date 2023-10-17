@@ -517,13 +517,13 @@ func (t *transferQueueActiveTaskExecutor) processNexusStartTask(
 		return fmt.Errorf("can't find outbound nexus service: %s (namespace: %s)", task.StartCall.Service, ns.Name())
 	}
 
-	weContext, release, err := getWorkflowExecutionContextForTask(ctx, t.shardContext, t.cache, task)
+	weContext, release, err := getWorkflowExecutionContextForTask(ctx, t.cache, task)
 	if err != nil {
 		return err
 	}
 	defer func() { release(retError) }()
 
-	mutableState, err := loadMutableStateForTransferTask(ctx, t.shardContext, weContext, task, t.metricHandler, t.logger)
+	mutableState, err := loadMutableStateForTransferTask(ctx, weContext, task, t.metricHandler, t.logger)
 	if err != nil {
 		return err
 	}
@@ -616,7 +616,7 @@ func (t *transferQueueActiveTaskExecutor) transitionNexusOperation(
 	task *tasks.NexusTask,
 	updateFunc func(mutableState workflow.MutableState) error,
 ) (retError error) {
-	weContext, release, err := getWorkflowExecutionContextForTask(ctx, t.shardContext, t.cache, task)
+	weContext, release, err := getWorkflowExecutionContextForTask(ctx, t.cache, task)
 	if err != nil {
 		return err
 	}
@@ -629,13 +629,13 @@ func (t *transferQueueActiveTaskExecutor) processNexusCallbackTask(
 	ctx context.Context,
 	task *tasks.NexusTask,
 ) (retError error) {
-	weContext, release, err := getWorkflowExecutionContextForTask(ctx, t.shardContext, t.cache, task)
+	weContext, release, err := getWorkflowExecutionContextForTask(ctx, t.cache, task)
 	if err != nil {
 		return err
 	}
 	defer func() { release(retError) }()
 
-	mutableState, err := loadMutableStateForTransferTask(ctx, t.shardContext, weContext, task, t.metricHandler, t.logger)
+	mutableState, err := loadMutableStateForTransferTask(ctx, weContext, task, t.metricHandler, t.logger)
 	if err != nil {
 		return err
 	}

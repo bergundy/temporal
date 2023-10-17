@@ -121,6 +121,8 @@ func (f *transferQueueFactory) CreateQueue(
 		metricsHandler,
 	)
 
+	currentClusterName := f.ClusterMetadata.GetCurrentClusterName()
+
 	resolver, err := f.MembershipMonitor.GetResolver(primitives.FrontendService)
 	if err != nil {
 		logger.Panic("failed to get frontend service resolver", tag.Error(err))

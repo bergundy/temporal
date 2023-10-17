@@ -55,7 +55,7 @@ func (c *metricClient) CompleteNexusOperation(
 	opts ...grpc.CallOption,
 ) (_ *historyservice.CompleteNexusOperationResponse, retError error) {
 
-	metricsHandler, startTime := c.startMetricsRecording(ctx, "HistoryClientCompleteNexusOperation")
+	metricsHandler, startTime := c.startMetricsRecording(ctx, metrics.HistoryClientCompleteNexusOperationScope)
 	defer func() {
 		c.finishMetricsRecording(metricsHandler, startTime, retError)
 	}()

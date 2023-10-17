@@ -794,9 +794,10 @@ func (v *commandAttrValidator) validateScheduleNexusOperationAttributes(
 		return failedCause, serviceerror.NewInvalidArgument("Required field Operation is not set on command.")
 	}
 
-	if err := timer.ValidateAndCapTimer(attributes.GetTimeout()); err != nil {
-		return failedCause, serviceerror.NewInvalidArgument(fmt.Sprintf("Invalid Timeout: %v.", err))
-	}
+	// TODO: timer isn't in this branch
+	// if err := timer.ValidateAndCapTimer(attributes.GetTimeout()); err != nil {
+	// 	return failedCause, serviceerror.NewInvalidArgument(fmt.Sprintf("Invalid Timeout: %v.", err))
+	// }
 
 	// TODO: header and payload validation
 

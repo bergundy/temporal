@@ -85,7 +85,6 @@ import (
 	"go.temporal.io/server/common/sdk"
 	"go.temporal.io/server/common/searchattribute"
 	"go.temporal.io/server/common/tasktoken"
-	"go.temporal.io/server/common/util"
 	"go.temporal.io/server/service/worker/batcher"
 	"go.temporal.io/server/service/worker/scheduler"
 )
@@ -157,7 +156,7 @@ func (wh *WorkflowHandler) PollNexusTaskQueue(ctx context.Context, request *work
 	// 	return nil, err
 	// }
 
-	if err := wh.validateTaskQueue(request.TaskQueue, namespaceName); err != nil {
+	if err := wh.validateTaskQueue(request.TaskQueue); err != nil {
 		return nil, err
 	}
 
@@ -3266,9 +3265,9 @@ func (wh *WorkflowHandler) DescribeSchedule(ctx context.Context, request *workfl
 	expiration := 4 * time.Second
 	if deadline, ok := ctx.Deadline(); ok {
 		remaining := time.Until(deadline) - 1*time.Second
-		expiration = util.Min(expiration, remaining)
+		expiration = min(expiration, remaining)
 	}
-	expiration = util.Max(expiration, 1*time.Second)
+	expiration = max(expiration, 1*time.Second)
 	policy := backoff.NewExponentialRetryPolicy(200 * time.Millisecond).
 		WithExpirationInterval(expiration)
 	isWaitErr := func(e error) bool { return e == errWaitForRefresh }
