@@ -27,8 +27,11 @@ package history
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"math/rand"
+	"net"
 	"net/http"
 	"net/url"
 
@@ -50,6 +53,7 @@ import (
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
+	"go.temporal.io/server/common/membership"
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/persistence"
@@ -79,8 +83,40 @@ type (
 
 		workflowResetter        ndc.WorkflowResetter
 		parentClosePolicyClient parentclosepolicy.Client
+		frontendResolver        membership.ServiceResolver
 	}
 )
+
+// TODO: move this out of here
+func (t *transferQueueActiveTaskExecutor) httpCaller(r *http.Request) (*http.Response, error) {
+	if err := rewriteLocalNexusURL(r.URL, t.frontendResolver); err != nil {
+		return nil, err
+	}
+	// TODO: use a different client
+	return http.DefaultClient.Do(r)
+}
+
+// TODO: move this out of here
+func rewriteLocalNexusURL(u *url.URL, frontendResolver membership.ServiceResolver) error {
+	if u.Hostname() != "localhost" {
+		return nil
+	}
+	// TODO: this is okay if the callback is local to the cluster, otherwise, we'll need some global resolution
+	members := frontendResolver.Members()
+	if len(members) == 0 {
+		return errors.New("no frontend service members")
+	}
+	idx := rand.Intn(len(members))
+	address := members[idx].GetAddress()
+	host, _, err := net.SplitHostPort(address)
+	if err != nil {
+		return err
+	}
+
+	// TODO: get the configured port here
+	u.Host = fmt.Sprintf("%s:%d", host, 7253)
+	return nil
+}
 
 func newTransferQueueActiveTaskExecutor(
 	shard shard.Context,
@@ -92,6 +128,7 @@ func newTransferQueueActiveTaskExecutor(
 	historyRawClient resource.HistoryRawClient,
 	matchingRawClient resource.MatchingRawClient,
 	visibilityManager manager.VisibilityManager,
+	frontendResolver membership.ServiceResolver,
 ) queues.Executor {
 	return &transferQueueActiveTaskExecutor{
 		transferQueueTaskExecutorBase: newTransferQueueTaskExecutorBase(
@@ -114,6 +151,7 @@ func newTransferQueueActiveTaskExecutor(
 			sdkClientFactory,
 			config.NumParentClosePolicySystemWorkflows(),
 		),
+		frontendResolver: frontendResolver,
 	}
 }
 
@@ -481,8 +519,8 @@ func (t *transferQueueActiveTaskExecutor) processNexusStartTask(
 
 	// TODO: check which payload is relevant, figure out the encoding...
 	body := bytes.NewReader(attrs.Input.GetData())
-	// TODO: get the URL of the frontend service
-	u, _ := url.Parse("http://localhost:7253/system/callback")
+	// TODO: get the "public" URL of the frontend service
+	u, _ := url.Parse("http://localhost/system/callback")
 	q := u.Query()
 	q.Add("namespace", mutableState.GetNamespaceEntry().Name().String())
 	q.Add("workflow_id", mutableState.GetExecutionInfo().GetWorkflowId())
@@ -502,8 +540,10 @@ func (t *transferQueueActiveTaskExecutor) processNexusStartTask(
 	// the rest of logic is making RPC call, which takes time.
 	release(nil)
 
+	// TODO: this is going to move from here once we have a queue per (source, destination) pair
 	client, err := nexus.NewClient(nexus.ClientOptions{
 		ServiceBaseURL: svc.GetBaseUrl(),
+		HTTPCaller:     t.httpCaller,
 	})
 	if err != nil {
 		return err
@@ -596,7 +636,14 @@ func (t *transferQueueActiveTaskExecutor) processNexusCallbackTask(
 	// TODO: check which payload is relevant, figure out the encoding...
 	body := bytes.NewReader(payloads.GetPayloads()[0].Data)
 	completion := nexus.OperationCompletionSuccessful{Header: http.Header{"Content-Type": []string{"application/json"}}, Body: body}
-	req, err := nexus.NewCompletionHTTPRequest(ctx, task.Callback.GetUrl(), &completion)
+	u, err := url.Parse(task.Callback.GetUrl())
+	if err != nil {
+		return err
+	}
+	if err := rewriteLocalNexusURL(u, t.frontendResolver); err != nil {
+		return err
+	}
+	req, err := nexus.NewCompletionHTTPRequest(ctx, u.String(), &completion)
 	if err != nil {
 		return err
 	}
