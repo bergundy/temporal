@@ -45,7 +45,7 @@ require (
 	go.opentelemetry.io/otel/metric v1.16.0
 	go.opentelemetry.io/otel/sdk v1.16.0
 	go.opentelemetry.io/otel/sdk/metric v0.39.0
-	go.temporal.io/api v1.24.1-0.20231003165936-bb03061759c8
+	go.temporal.io/api v1.24.1-0.20231012201728-a472e79c46c9
 	go.temporal.io/sdk v1.24.0
 	go.temporal.io/version v0.3.0
 	go.uber.org/atomic v1.11.0
@@ -105,7 +105,7 @@ require (
 	github.com/mattn/go-isatty v0.0.19 // indirect
 	github.com/mattn/go-runewidth v0.0.14 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
-	github.com/nexus-rpc/sdk-go v0.0.0-20230906182323-c6769ebc0c28
+	github.com/nexus-rpc/sdk-go v0.0.1
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
 	github.com/pkg/errors v0.9.1
 	github.com/pmezard/go-difflib v1.0.0 // indirect
@@ -153,6 +153,6 @@ require (
 	modernc.org/token v1.1.0 // indirect
 )
 
-replace go.temporal.io/api => ../api-go
+replace github.com/nexus-rpc/sdk-go => github.com/bergundy/nexus-sdk-go v0.0.2-0.20231012220114-86dc79d46117
 
-replace github.com/nexus-rpc/sdk-go => ../nexus-sdk-go
+replace go.temporal.io/sdk => github.com/bergundy/temporal-sdk-go v0.0.0-20231017181924-c196d32fd16c
