@@ -2,7 +2,6 @@ package frontend
 
 import (
 	"context"
-	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -79,14 +78,14 @@ func NewNexusAPIServer(
 		}
 	}()
 
-	// Wrap the listener in a TLS listener if there is any TLS config
-	if tlsConfigProvider != nil {
-		if tlsConfig, err := tlsConfigProvider.GetFrontendServerConfig(); err != nil {
-			return nil, fmt.Errorf("failed getting TLS config for Nexus API: %w", err)
-		} else if tlsConfig != nil {
-			listener = tls.NewListener(listener, tlsConfig)
-		}
-	}
+	// // Wrap the listener in a TLS listener if there is any TLS config
+	// if tlsConfigProvider != nil {
+	// 	if tlsConfig, err := tlsConfigProvider.GetFrontendServerConfig(); err != nil {
+	// 		return nil, fmt.Errorf("failed getting TLS config for Nexus API: %w", err)
+	// 	} else if tlsConfig != nil {
+	// 		listener = tls.NewListener(listener, tlsConfig)
+	// 	}
+	// }
 
 	s := &NexusAPIServer{
 		listener:          listener,
