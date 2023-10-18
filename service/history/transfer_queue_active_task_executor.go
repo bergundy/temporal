@@ -553,7 +553,7 @@ func (t *transferQueueActiveTaskExecutor) processNexusStartTask(
 	q := u.Query()
 	q.Add("namespace", mutableState.GetNamespaceEntry().Name().String())
 	q.Add("workflow_id", mutableState.GetExecutionInfo().GetWorkflowId())
-	q.Add("run_id", mutableState.GetExecutionInfo().GetBaseExecutionInfo().GetRunId())
+	q.Add("run_id", mutableState.GetExecutionState().GetRunId())
 	q.Add("scheduled_event_id", fmt.Sprintf("%d", task.StartCall.ScheduledEventId))
 	u.RawQuery = q.Encode()
 	req := nexus.StartOperationOptions{

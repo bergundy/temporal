@@ -738,6 +738,7 @@ func (d *namespaceHandlerImpl) createResponse(
 		OwnerEmail:  info.Owner,
 		Data:        info.Data,
 		Id:          info.Id,
+		OutgoingServiceRegistry: info.GetOutgoingNexusRegistry(),
 
 		SupportsSchedules: d.supportsSchedules(info.Name),
 	}

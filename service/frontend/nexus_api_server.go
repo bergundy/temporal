@@ -166,6 +166,7 @@ func (h *NexusAPIServer) serveHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// TODO: tidy this up, use the completion handler from the nexus SDK
 	if r.URL.Path == "/system/callback" {
+		fmt.Println("AAAAAAAAAAAAAAAA Got /system/callback")
 		q := r.URL.Query()
 		namespaceName := q.Get("namespace")
 		// TODO: validations
@@ -197,6 +198,7 @@ func (h *NexusAPIServer) serveHTTP(w http.ResponseWriter, r *http.Request) {
 				Body:    b,
 			},
 		})
+		fmt.Println("AAAAAAAAAAAAAAAA complete request sent to history, error:", err)
 		if err != nil {
 			h.logger.Error("nexus callback: failed to send completion to history service", tag.WorkflowNamespace(namespaceName), tag.Error(err))
 			w.WriteHeader(http.StatusInternalServerError)
