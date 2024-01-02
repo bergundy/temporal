@@ -111,6 +111,10 @@ var QueueModule = fx.Options(
 		},
 		fx.Annotated{
 			Group:  QueueFactoryFxGroup,
+			Target: NewCallbackQueueFactory,
+		},
+		fx.Annotated{
+			Group:  QueueFactoryFxGroup,
 			Target: NewMemoryScheduledQueueFactory,
 		},
 		getOptionalQueueFactories,

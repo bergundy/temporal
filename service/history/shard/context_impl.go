@@ -653,6 +653,7 @@ func (s *ContextImpl) UpdateWorkflowExecution(
 		return nil, err
 	}
 
+	// TODO: Why 2?
 	taskMaps := make([]map[tasks.Category][]tasks.Task, 0, 2)
 	taskMaps = append(taskMaps, request.UpdateWorkflowMutation.Tasks)
 	if request.NewWorkflowSnapshot != nil {

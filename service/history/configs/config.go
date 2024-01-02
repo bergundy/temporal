@@ -151,6 +151,23 @@ type Config struct {
 	TransferProcessorPollBackoffInterval                dynamicconfig.DurationPropertyFn
 	TransferProcessorEnsureCloseBeforeDelete            dynamicconfig.BoolPropertyFn
 
+	// CallbackQueueProcessor settings
+	CallbackTaskHighPriorityRPS                         dynamicconfig.IntPropertyFnWithNamespaceFilter
+	CallbackTaskBatchSize                               dynamicconfig.IntPropertyFn
+	CallbackProcessorSchedulerWorkerCount               dynamicconfig.IntPropertyFn
+	CallbackProcessorSchedulerActiveRoundRobinWeights   dynamicconfig.MapPropertyFnWithNamespaceFilter
+	CallbackProcessorSchedulerStandbyRoundRobinWeights  dynamicconfig.MapPropertyFnWithNamespaceFilter
+	CallbackProcessorFailoverMaxPollRPS                 dynamicconfig.IntPropertyFn
+	CallbackProcessorMaxPollRPS                         dynamicconfig.IntPropertyFn
+	CallbackProcessorMaxPollHostRPS                     dynamicconfig.IntPropertyFn
+	CallbackProcessorMaxPollInterval                    dynamicconfig.DurationPropertyFn
+	CallbackProcessorMaxPollIntervalJitterCoefficient   dynamicconfig.FloatPropertyFn
+	CallbackProcessorUpdateAckInterval                  dynamicconfig.DurationPropertyFn
+	CallbackProcessorUpdateAckIntervalJitterCoefficient dynamicconfig.FloatPropertyFn
+	CallbackProcessorCompleteCallbackInterval           dynamicconfig.DurationPropertyFn
+	CallbackProcessorPollBackoffInterval                dynamicconfig.DurationPropertyFn
+	CallbackProcessorEnsureCloseBeforeDelete            dynamicconfig.BoolPropertyFn
+
 	// ReplicatorQueueProcessor settings
 	// TODO: clean up unused replicator settings
 	ReplicatorTaskBatchSize                               dynamicconfig.IntPropertyFn
@@ -323,6 +340,8 @@ type Config struct {
 
 	// FrontendAccessHistoryFraction is an interim flag across 2 minor releases and will be removed once fully enabled.
 	FrontendAccessHistoryFraction dynamicconfig.FloatPropertyFn
+
+	CallbackTaskTimeout dynamicconfig.DurationPropertyFn
 }
 
 const (
@@ -437,6 +456,21 @@ func NewConfig(
 		TransferProcessorCompleteTransferInterval:           dc.GetDurationProperty(dynamicconfig.TransferProcessorCompleteTransferInterval, 60*time.Second),
 		TransferProcessorPollBackoffInterval:                dc.GetDurationProperty(dynamicconfig.TransferProcessorPollBackoffInterval, 5*time.Second),
 		TransferProcessorEnsureCloseBeforeDelete:            dc.GetBoolProperty(dynamicconfig.TransferProcessorEnsureCloseBeforeDelete, true),
+
+		CallbackTaskBatchSize:                               dc.GetIntProperty(dynamicconfig.CallbackTaskBatchSize, 100),
+		CallbackProcessorSchedulerWorkerCount:               dc.GetIntProperty(dynamicconfig.CallbackProcessorSchedulerWorkerCount, 512),
+		CallbackProcessorSchedulerActiveRoundRobinWeights:   dc.GetMapPropertyFnWithNamespaceFilter(dynamicconfig.CallbackProcessorSchedulerActiveRoundRobinWeights, ConvertWeightsToDynamicConfigValue(DefaultActiveTaskPriorityWeight)),
+		CallbackProcessorSchedulerStandbyRoundRobinWeights:  dc.GetMapPropertyFnWithNamespaceFilter(dynamicconfig.CallbackProcessorSchedulerStandbyRoundRobinWeights, ConvertWeightsToDynamicConfigValue(DefaultStandbyTaskPriorityWeight)),
+		CallbackProcessorFailoverMaxPollRPS:                 dc.GetIntProperty(dynamicconfig.CallbackProcessorFailoverMaxPollRPS, 1),
+		CallbackProcessorMaxPollRPS:                         dc.GetIntProperty(dynamicconfig.CallbackProcessorMaxPollRPS, 20),
+		CallbackProcessorMaxPollHostRPS:                     dc.GetIntProperty(dynamicconfig.CallbackProcessorMaxPollHostRPS, 0),
+		CallbackProcessorMaxPollInterval:                    dc.GetDurationProperty(dynamicconfig.CallbackProcessorMaxPollInterval, 1*time.Minute),
+		CallbackProcessorMaxPollIntervalJitterCoefficient:   dc.GetFloat64Property(dynamicconfig.CallbackProcessorMaxPollIntervalJitterCoefficient, 0.15),
+		CallbackProcessorUpdateAckInterval:                  dc.GetDurationProperty(dynamicconfig.CallbackProcessorUpdateAckInterval, 30*time.Second),
+		CallbackProcessorUpdateAckIntervalJitterCoefficient: dc.GetFloat64Property(dynamicconfig.CallbackProcessorUpdateAckIntervalJitterCoefficient, 0.15),
+		CallbackProcessorCompleteCallbackInterval:           dc.GetDurationProperty(dynamicconfig.CallbackProcessorCompleteCallbackInterval, 60*time.Second),
+		CallbackProcessorPollBackoffInterval:                dc.GetDurationProperty(dynamicconfig.CallbackProcessorPollBackoffInterval, 5*time.Second),
+		CallbackProcessorEnsureCloseBeforeDelete:            dc.GetBoolProperty(dynamicconfig.CallbackProcessorEnsureCloseBeforeDelete, true),
 
 		ReplicatorTaskBatchSize:                               dc.GetIntProperty(dynamicconfig.ReplicatorTaskBatchSize, 100),
 		ReplicatorTaskWorkerCount:                             dc.GetIntProperty(dynamicconfig.ReplicatorTaskWorkerCount, 10),
@@ -585,6 +619,8 @@ func NewConfig(
 		SendRawWorkflowHistory: dc.GetBoolPropertyFnWithNamespaceFilter(dynamicconfig.SendRawWorkflowHistory, false),
 
 		FrontendAccessHistoryFraction: dc.GetFloat64Property(dynamicconfig.FrontendAccessHistoryFraction, 0.0),
+
+		CallbackTaskTimeout: dc.GetDurationProperty(dynamicconfig.CallbackTaskTimeout, time.Second*10),
 	}
 
 	return cfg

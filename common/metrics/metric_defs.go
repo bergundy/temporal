@@ -211,6 +211,12 @@ const (
 	PersistenceRangeCompleteVisibilityTasksScope = "RangeCompleteVisibilityTasks"
 	// PersistenceGetReplicationTaskScope tracks GetReplicationTask calls made by service to persistence layer
 	PersistenceGetArchivalTasksScope = "GetArchivalTasks"
+	// PersistenceGetCallbackTasksScope tracks GetCallbackTask calls made by service to persistence layer
+	PersistenceGetCallbackTasksScope = "GetCallbackTasks"
+	// PersistenceCompleteCallbackTasksScope tracks CompleteCallbackTask calls made by service to persistence layer
+	PersistenceCompleteCallbackTasksScope = "CompleteCallbackTasks"
+	// PersistenceRangeCompleteCallbackTasksScope tracks RangeCompleteCallbackTask calls made by service to persistence layer
+	PersistenceRangeCompleteCallbackTasksScope = "RangeCompleteCallbackTasks"
 	// PersistenceCompleteArchivalTaskScope tracks CompleteArchivalTasks calls made by service to persistence layer
 	PersistenceCompleteArchivalTaskScope = "CompleteArchivalTask"
 	// PersistenceRangeCompleteArchivalTasksScope tracks CompleteArchivalTasks calls made by service to persistence layer
@@ -425,6 +431,9 @@ const (
 	// HistoryRereplicationByActivityReplicationScope tracks history replication calls made by activity replication
 	HistoryRereplicationByActivityReplicationScope = "HistoryRereplicationByActivityReplication"
 
+	// CallbackQueueProcessorScope is the scope used by all metric emitted by callback queue processor
+	CallbackQueueProcessorScope = "CallbackQueueProcessor"
+
 	// ShardInfoScope is the scope used when updating shard info
 	ShardInfoScope = "ShardInfo"
 	// WorkflowContextScope is the scope used by WorkflowContext component
@@ -465,6 +474,8 @@ const (
 	OperationArchivalQueueProcessorScope = "ArchivalQueueProcessor"
 	// OperationMemoryScheduledQueueProcessorScope is a scope for memory scheduled queue processor.
 	OperationMemoryScheduledQueueProcessorScope = "MemoryScheduledQueueProcessor"
+	// OperationCallbackQueueProcessorScope is a scope for the callback queue processor.
+	OperationCallbackQueueProcessorScope = "CallbackQueueProcessor"
 )
 
 // Matching Scope

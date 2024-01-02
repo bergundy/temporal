@@ -28,6 +28,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"net/url"
 	"time"
 
 	"github.com/pborman/uuid"
@@ -1843,6 +1844,21 @@ func (ms *MutableStateImpl) ApplyWorkflowExecutionStartedEvent(
 	ms.executionInfo.WorkflowExecutionTimeout = event.GetWorkflowExecutionTimeout()
 	ms.executionInfo.DefaultWorkflowTaskTimeout = event.GetWorkflowTaskTimeout()
 
+	ms.executionInfo.Callbacks = make(map[string]*persistencespb.CallbackInfo, len(event.GetCompletionCallbacks()))
+	for _, cb := range event.GetCompletionCallbacks() {
+		callbackID := uuid.New()
+		ms.executionInfo.Callbacks[callbackID] = &persistencespb.CallbackInfo{
+			Version: ms.currentVersion,
+			Inner: &workflowpb.CallbackInfo{
+				Trigger: &workflowpb.CallbackInfo_Trigger{
+					Variant: &workflowpb.CallbackInfo_Trigger_WorkflowClosed{},
+				},
+				Callback:         cb,
+				State:            enumspb.CALLBACK_STATE_STANDBY,
+				RegistrationTime: startEvent.EventTime,
+			},
+		}
+	}
 	if err := ms.UpdateWorkflowStateStatus(
 		enumsspb.WORKFLOW_EXECUTION_STATE_CREATED,
 		enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING,
@@ -2800,7 +2816,7 @@ func (ms *MutableStateImpl) ApplyWorkflowExecutionCompletedEvent(
 	ms.executionInfo.CloseTime = event.GetEventTime()
 	ms.ClearStickyTaskQueue()
 	ms.writeEventToCache(event)
-	return nil
+	return ms.processCallbacks()
 }
 
 func (ms *MutableStateImpl) AddFailWorkflowEvent(
@@ -2845,7 +2861,7 @@ func (ms *MutableStateImpl) ApplyWorkflowExecutionFailedEvent(
 	ms.executionInfo.CloseTime = event.GetEventTime()
 	ms.ClearStickyTaskQueue()
 	ms.writeEventToCache(event)
-	return nil
+	return ms.processCallbacks()
 }
 
 func (ms *MutableStateImpl) AddTimeoutWorkflowEvent(
@@ -2889,7 +2905,7 @@ func (ms *MutableStateImpl) ApplyWorkflowExecutionTimedoutEvent(
 	ms.executionInfo.CloseTime = event.GetEventTime()
 	ms.ClearStickyTaskQueue()
 	ms.writeEventToCache(event)
-	return nil
+	return ms.processCallbacks()
 }
 
 func (ms *MutableStateImpl) AddWorkflowExecutionCancelRequestedEvent(
@@ -2969,7 +2985,7 @@ func (ms *MutableStateImpl) ApplyWorkflowExecutionCanceledEvent(
 	ms.executionInfo.CloseTime = event.GetEventTime()
 	ms.ClearStickyTaskQueue()
 	ms.writeEventToCache(event)
-	return nil
+	return ms.processCallbacks()
 }
 
 func (ms *MutableStateImpl) AddRequestCancelExternalWorkflowExecutionInitiatedEvent(
@@ -3628,7 +3644,7 @@ func (ms *MutableStateImpl) ApplyWorkflowExecutionTerminatedEvent(
 	ms.executionInfo.CloseTime = event.GetEventTime()
 	ms.ClearStickyTaskQueue()
 	ms.writeEventToCache(event)
-	return nil
+	return ms.processCallbacks()
 }
 
 func (ms *MutableStateImpl) AddWorkflowExecutionSignaled(
@@ -3724,6 +3740,12 @@ func (ms *MutableStateImpl) AddContinueAsNewEvent(
 	); err != nil {
 		return nil, nil, err
 	}
+	// Copy over close callbacks to the next execution.
+	for id, cb := range ms.executionInfo.Callbacks {
+		if _, ok := cb.Inner.GetTrigger().GetVariant().(*workflowpb.CallbackInfo_Trigger_WorkflowClosed); ok {
+			newMutableState.executionInfo.Callbacks[id] = cb
+		}
+	}
 
 	if err = newMutableState.SetHistoryTree(
 		ctx,
@@ -3792,7 +3814,7 @@ func (ms *MutableStateImpl) ApplyWorkflowExecutionContinuedAsNewEvent(
 	ms.executionInfo.CloseTime = continueAsNewEvent.GetEventTime()
 	ms.ClearStickyTaskQueue()
 	ms.writeEventToCache(continueAsNewEvent)
-	return nil
+	return ms.processCallbacks()
 }
 
 func (ms *MutableStateImpl) AddStartChildWorkflowExecutionInitiatedEvent(
@@ -4601,6 +4623,37 @@ func (ms *MutableStateImpl) UpdateDuplicatedResource(
 
 func (ms *MutableStateImpl) GenerateMigrationTasks() ([]tasks.Task, int64, error) {
 	return ms.taskGenerator.GenerateMigrationTasks()
+}
+
+func (ms *MutableStateImpl) processCallbacks() error {
+	for id, cb := range ms.GetExecutionInfo().GetCallbacks() {
+		switch cb.Inner.Trigger.GetVariant().(type) {
+		case *workflowpb.CallbackInfo_Trigger_WorkflowClosed:
+			if ms.GetExecutionState().GetState() == enumsspb.WORKFLOW_EXECUTION_STATE_COMPLETED && ms.GetExecutionState().GetStatus() != enumspb.WORKFLOW_EXECUTION_STATUS_CONTINUED_AS_NEW {
+				// TODO: when generating tasks after workflow completion, use a cached version of the
+				// current namespace failover version instead of the last history version.
+				cb.Version = ms.currentVersion
+				cb.Inner.State = enumspb.CALLBACK_STATE_SCHEDULED
+				// TODO: handle (hypopthetical) non nexus callbacks
+				// TODO: URLs need to be validated in the frontend
+				u, err := url.Parse(cb.Inner.Callback.GetNexus().Url)
+				if err != nil {
+					return serviceerror.NewInternal(fmt.Sprintf("failed to parse URL: %v", cb))
+				}
+				ms.AddTasks(&tasks.CallbackTask{
+					// TaskID and VisibilityTimestamp are set by shard
+					WorkflowKey:        ms.GetWorkflowKey(),
+					Version:            cb.Version,
+					CallbackID:         id,
+					Attempt:            cb.Inner.Attempt,
+					DestinationAddress: u.Host,
+				})
+			}
+		default:
+			return serviceerror.NewInternal(fmt.Sprintf("don't know how to process callback task: %v", cb))
+		}
+	}
+	return nil
 }
 
 func (ms *MutableStateImpl) prepareCloseTransaction(

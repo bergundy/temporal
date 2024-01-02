@@ -27,6 +27,7 @@ package history
 import (
 	"context"
 	"fmt"
+	"net/url"
 
 	"github.com/pborman/uuid"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -131,6 +132,8 @@ func (t *timerQueueActiveTaskExecutor) Execute(
 		err = t.executeWorkflowBackoffTimerTask(ctx, task)
 	case *tasks.DeleteHistoryEventTask:
 		err = t.executeDeleteHistoryEventTask(ctx, task)
+	case *tasks.CallbackBackoffTask:
+		err = t.executeCallbackBackoffTask(ctx, task)
 	default:
 		err = errUnknownTimerTask
 	}
@@ -142,6 +145,53 @@ func (t *timerQueueActiveTaskExecutor) Execute(
 	}
 }
 
+// TODO: move me
+func (t *timerQueueActiveTaskExecutor) executeCallbackBackoffTask(
+	ctx context.Context,
+	task *tasks.CallbackBackoffTask,
+) (retError error) {
+	ctx, cancel := context.WithTimeout(ctx, taskTimeout)
+	defer cancel()
+
+	weContext, release, err := getWorkflowExecutionContextForTask(ctx, t.shardContext, t.cache, task)
+	if err != nil {
+		return err
+	}
+	defer func() { release(retError) }()
+
+	mutableState, err := loadMutableStateForTimerTask(ctx, t.shardContext, weContext, task, t.metricHandler, t.logger)
+	if err != nil {
+		return err
+	}
+	if mutableState == nil {
+		// TODO: should release check ErrWorkflowExecutionNotFound and prevent unload instead of putting this
+		// logic everywhere?
+		release(nil) // release(nil) so mutable state is not unloaded from cache
+		return consts.ErrWorkflowExecutionNotFound
+	}
+
+	callback := mutableState.GetExecutionInfo().GetCallbacks()[task.CallbackID]
+	// TODO: move this code out of the executor
+	// TODO: compare Version and Attempt
+	// TODO: update callback.Version
+	// TODO: check callback is not blocked (not implemented yet)
+	callback.Inner.State = enumspb.CALLBACK_STATE_SCHEDULED
+	// TODO: handle (hypopthetical) non nexus callbacks
+	u, err := url.Parse(callback.Inner.Callback.GetNexus().Url)
+	if err != nil {
+		return serviceerror.NewInternal(fmt.Sprintf("failed to parse URL: %v", callback))
+	}
+	mutableState.AddTasks(&tasks.CallbackTask{
+		// TaskID and VisibilityTimestamp are set by shard
+		WorkflowKey:        mutableState.GetWorkflowKey(),
+		Version:            callback.Version,
+		CallbackID:         task.CallbackID,
+		Attempt:            callback.Inner.Attempt,
+		DestinationAddress: u.Host,
+	})
+
+	return weContext.UpdateWorkflowExecutionAsActive(ctx, t.shardContext)
+}
 func (t *timerQueueActiveTaskExecutor) executeUserTimerTimeoutTask(
 	ctx context.Context,
 	task *tasks.UserTimerTask,
