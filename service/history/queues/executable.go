@@ -531,6 +531,11 @@ func (e *executableImpl) SetScheduledTime(t time.Time) {
 	e.scheduledTime = t
 }
 
+func (e *executableImpl) GetDestination() string {
+	// for now it's okay to panic, consider changing this
+	return e.Task.(tasks.HasDestination).GetDestination()
+}
+
 func (e *executableImpl) shouldResubmitOnNack(attempt int, err error) bool {
 	// this is an optimization for skipping rescheduler and retry the task sooner.
 	// this is useful for errors like workflow busy, which doesn't have to wait for

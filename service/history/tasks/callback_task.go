@@ -30,6 +30,7 @@ import (
 )
 
 var _ Task = (*CallbackTask)(nil)
+var _ HasDestination = (*CallbackTask)(nil)
 
 type (
 	CallbackTask struct {
@@ -47,38 +48,43 @@ type (
 	}
 )
 
-func (a *CallbackTask) GetKey() Key {
-	return NewImmediateKey(a.TaskID)
+// GetDestination implements HasDestination.
+func (t *CallbackTask) GetDestination() string {
+	return t.DestinationAddress
 }
 
-func (a *CallbackTask) GetVersion() int64 {
-	return a.Version
+func (t *CallbackTask) GetKey() Key {
+	return NewImmediateKey(t.TaskID)
 }
 
-func (a *CallbackTask) SetVersion(version int64) {
-	a.Version = version
+func (t *CallbackTask) GetVersion() int64 {
+	return t.Version
 }
 
-func (a *CallbackTask) GetTaskID() int64 {
-	return a.TaskID
+func (t *CallbackTask) SetVersion(version int64) {
+	t.Version = version
 }
 
-func (a *CallbackTask) SetTaskID(id int64) {
-	a.TaskID = id
+func (t *CallbackTask) GetTaskID() int64 {
+	return t.TaskID
 }
 
-func (a *CallbackTask) GetVisibilityTime() time.Time {
-	return a.VisibilityTimestamp
+func (t *CallbackTask) SetTaskID(id int64) {
+	t.TaskID = id
 }
 
-func (a *CallbackTask) SetVisibilityTime(timestamp time.Time) {
-	a.VisibilityTimestamp = timestamp
+func (t *CallbackTask) GetVisibilityTime() time.Time {
+	return t.VisibilityTimestamp
 }
 
-func (a *CallbackTask) GetCategory() Category {
+func (t *CallbackTask) SetVisibilityTime(timestamp time.Time) {
+	t.VisibilityTimestamp = timestamp
+}
+
+func (t *CallbackTask) GetCategory() Category {
 	return CategoryCallback
 }
 
-func (a *CallbackTask) GetType() enumsspb.TaskType {
+func (t *CallbackTask) GetType() enumsspb.TaskType {
 	return enumsspb.TASK_TYPE_CALLBACK
 }

@@ -49,6 +49,10 @@ type (
 		SetTaskID(id int64)
 		SetVisibilityTime(timestamp time.Time)
 	}
+
+	HasDestination interface {
+		GetDestination() string
+	}
 )
 
 // GetShardIDForTask computes the shardID for a given task using the task's namespace, workflow ID and the number of

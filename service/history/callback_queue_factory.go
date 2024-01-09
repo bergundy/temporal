@@ -62,9 +62,7 @@ type (
 	}
 )
 
-func NewCallbackQueueFactory(
-	params callbackQueueFactoryParams,
-) QueueFactory {
+func NewCallbackQueueFactory(params callbackQueueFactoryParams) QueueFactory {
 	return &callbackQueueFactory{
 		callbackQueueFactoryParams: params,
 		HostReaderRateLimiter: queues.NewReaderPriorityRateLimiter(
@@ -73,7 +71,7 @@ func NewCallbackQueueFactory(
 				params.Config.PersistenceMaxQPS,
 				callbackQueuePersistenceMaxRPSRatio,
 			),
-			int64(params.Config.QueueMaxReaderCount()),
+			int64(params.Config.TransferQueueMaxReaderCount()),
 		),
 	}
 }
@@ -167,9 +165,10 @@ func (f *callbackQueueFactory) CreateQueue(
 			MaxPollIntervalJitterCoefficient:    f.Config.CallbackProcessorMaxPollIntervalJitterCoefficient,
 			CheckpointInterval:                  f.Config.CallbackProcessorUpdateAckInterval,
 			CheckpointIntervalJitterCoefficient: f.Config.CallbackProcessorUpdateAckIntervalJitterCoefficient,
-			MaxReaderCount:                      f.Config.QueueMaxReaderCount,
+			MaxReaderCount:                      f.Config.CallbackQueueMaxReaderCount,
 		},
 		f.HostReaderRateLimiter,
+		queues.GrouperNamespaceIDAndDestination{},
 		logger,
 		metricsHandler,
 		factory,

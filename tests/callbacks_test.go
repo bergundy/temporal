@@ -146,6 +146,7 @@ func (s *FunctionalSuite) TestWorkflowCallbacks() {
 	callbackInfo := description.Callbacks[0]
 	s.ProtoEqual(request.CompletionCallbacks[0], callbackInfo.Callback)
 	s.ProtoEqual(&workflowpb.CallbackInfo_Trigger{Variant: &workflowpb.CallbackInfo_Trigger_WorkflowClosed{WorkflowClosed: &workflowpb.CallbackInfo_WorkflowClosed{}}}, callbackInfo.Trigger)
+	s.Equal(enumspb.CALLBACK_STATE_SUCCEEDED, callbackInfo.State)
 	s.Equal(int32(2), callbackInfo.Attempt)
 	s.Equal("500 Internal Server Error", callbackInfo.LastAttemptFailure.Message)
 }
