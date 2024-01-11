@@ -81,6 +81,7 @@ func NewStateMachine(id string, data *persistencespb.CallbackInfo, env statemach
 		},
 		fsm.Callbacks{
 			"enter_state": func(ctx context.Context, e *fsm.Event) {
+				fmt.Println("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "enter state", e.Dst)
 				sm.Data.Version = env.GetVersion()
 				state, err := enumspb.CallbackStateFromString(e.Dst)
 				if err != nil {
@@ -111,10 +112,12 @@ func (m *StateMachine) EnterScheduled() {
 		panic(fmt.Errorf("unsupported callback variant %v", v))
 	}
 
+	fmt.Println("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", "scheduling")
+
 	m.env.Schedule(statemachines.Task{
 		Type: enums.TASK_TYPE_CALLBACK,
 		Data: persistencespb.CallbackTaskInfo{
-			// Should be set by the framework
+			// Should be set by the framework?
 			CallbackId:         m.ID,
 			Attempt:            m.Data.Inner.Attempt,
 			DestinationAddress: destination,

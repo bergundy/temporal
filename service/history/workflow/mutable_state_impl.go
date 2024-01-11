@@ -4654,6 +4654,7 @@ func (ms *MutableStateImpl) processCallbacks() error {
 		switch cb.Inner.Trigger.GetVariant().(type) {
 		case *workflowpb.CallbackInfo_Trigger_WorkflowClosed:
 			if ms.GetExecutionState().GetState() == enumsspb.WORKFLOW_EXECUTION_STATE_COMPLETED && ms.GetExecutionState().GetStatus() != enumspb.WORKFLOW_EXECUTION_STATUS_CONTINUED_AS_NEW {
+				// TODO: implement BLOCKED
 				sm := callbacks.NewStateMachine(id, cb, ms)
 				if !sm.Can(callbacks.EventScheduled) {
 					continue
