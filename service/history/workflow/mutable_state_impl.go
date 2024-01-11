@@ -28,7 +28,6 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
-	"net/url"
 	"time"
 
 	"github.com/pborman/uuid"
@@ -72,11 +71,13 @@ import (
 	"go.temporal.io/server/common/searchattribute"
 	"go.temporal.io/server/common/util"
 	"go.temporal.io/server/common/worker_versioning"
+	"go.temporal.io/server/service/history/callbacks"
 	"go.temporal.io/server/service/history/configs"
 	"go.temporal.io/server/service/history/consts"
 	"go.temporal.io/server/service/history/events"
 	"go.temporal.io/server/service/history/historybuilder"
 	"go.temporal.io/server/service/history/shard"
+	"go.temporal.io/server/service/history/statemachines"
 	"go.temporal.io/server/service/history/tasks"
 )
 
@@ -203,6 +204,7 @@ type (
 )
 
 var _ MutableState = (*MutableStateImpl)(nil)
+var _ statemachines.Environment = (*MutableStateImpl)(nil)
 
 func NewMutableState(
 	shard shard.Context,
@@ -425,6 +427,28 @@ func NewSanitizedMutableState(
 	}
 	mutableState.currentVersion = lastWriteVersion
 	return mutableState, nil
+}
+
+// TODO: when generating tasks after workflow completion, use a cached version of the
+// current namespace failover version instead of the last history version.
+func (ms *MutableStateImpl) GetVersion() int64 {
+	return ms.currentVersion
+}
+
+func (ms *MutableStateImpl) Schedule(task statemachines.Task) {
+	switch t := task.Data.(type) {
+	case *persistencespb.CallbackTaskInfo:
+		ms.AddTasks(&tasks.CallbackTask{
+			// TaskID and VisibilityTimestamp are set by shard
+			WorkflowKey:        ms.GetWorkflowKey(),
+			Version:            ms.GetVersion(),
+			CallbackID:         t.CallbackId,
+			Attempt:            t.Attempt,
+			DestinationAddress: t.DestinationAddress,
+		})
+	default:
+		panic(fmt.Errorf("don't know how to schedule %v"))
+	}
 }
 
 func (ms *MutableStateImpl) CloneToProto() *persistencespb.WorkflowMutableState {
@@ -4630,24 +4654,13 @@ func (ms *MutableStateImpl) processCallbacks() error {
 		switch cb.Inner.Trigger.GetVariant().(type) {
 		case *workflowpb.CallbackInfo_Trigger_WorkflowClosed:
 			if ms.GetExecutionState().GetState() == enumsspb.WORKFLOW_EXECUTION_STATE_COMPLETED && ms.GetExecutionState().GetStatus() != enumspb.WORKFLOW_EXECUTION_STATUS_CONTINUED_AS_NEW {
-				// TODO: when generating tasks after workflow completion, use a cached version of the
-				// current namespace failover version instead of the last history version.
-				cb.Version = ms.currentVersion
-				cb.Inner.State = enumspb.CALLBACK_STATE_SCHEDULED
-				// TODO: handle (hypopthetical) non nexus callbacks
-				// TODO: URLs need to be validated in the frontend
-				u, err := url.Parse(cb.Inner.Callback.GetNexus().Url)
-				if err != nil {
-					return serviceerror.NewInternal(fmt.Sprintf("failed to parse URL: %v", cb))
+				sm := callbacks.NewStateMachine(id, cb, ms)
+				if !sm.Can(callbacks.EventScheduled) {
+					continue
 				}
-				ms.AddTasks(&tasks.CallbackTask{
-					// TaskID and VisibilityTimestamp are set by shard
-					WorkflowKey:        ms.GetWorkflowKey(),
-					Version:            cb.Version,
-					CallbackID:         id,
-					Attempt:            cb.Inner.Attempt,
-					DestinationAddress: u.Host,
-				})
+				if err := sm.Event(context.Background(), callbacks.EventScheduled); err != nil {
+					return err
+				}
 			}
 		default:
 			return serviceerror.NewInternal(fmt.Sprintf("don't know how to process callback task: %v", cb))
