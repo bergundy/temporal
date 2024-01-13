@@ -435,6 +435,10 @@ func (ms *MutableStateImpl) GetVersion() int64 {
 	return ms.currentVersion
 }
 
+func (ms *MutableStateImpl) GetCurrentTime() time.Time {
+	return ms.shard.GetCurrentTime(ms.shard.GetClusterMetadata().GetCurrentClusterName())
+}
+
 func (ms *MutableStateImpl) Schedule(task statemachines.Task) {
 	switch t := task.Data.(type) {
 	case *persistencespb.CallbackTaskInfo:
@@ -446,9 +450,16 @@ func (ms *MutableStateImpl) Schedule(task statemachines.Task) {
 			Attempt:            t.Attempt,
 			DestinationAddress: t.DestinationAddress,
 		})
-	default:
-		panic(fmt.Errorf("don't know how to schedule %v"))
+	case *persistencespb.TimerTaskInfo:
+		ms.AddTasks(&tasks.CallbackBackoffTask{
+			WorkflowKey:         ms.GetWorkflowKey(),
+			Version:             ms.GetVersion(),
+			VisibilityTimestamp: t.VisibilityTime.AsTime(),
+			Attempt:             t.ScheduleAttempt,
+			CallbackID:          t.CallbackId,
+		})
 	}
+	panic(fmt.Errorf("don't know how to schedule %v", task))
 }
 
 func (ms *MutableStateImpl) CloneToProto() *persistencespb.WorkflowMutableState {

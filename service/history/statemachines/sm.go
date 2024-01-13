@@ -1,6 +1,8 @@
 package statemachines
 
 import (
+	"time"
+
 	enumsspb "go.temporal.io/server/api/enums/v1"
 )
 
@@ -13,4 +15,5 @@ type Task struct {
 type Environment interface {
 	GetVersion() int64
 	Schedule(task Task)
+	GetCurrentTime() time.Time
 }
