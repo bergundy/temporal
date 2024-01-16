@@ -203,11 +203,11 @@ func (t *callbackQueueActiveTaskExecutor) processNexusCallbackTask(ctx context.C
 	response, err := http.DefaultClient.Do(request)
 	return t.updateCallbackState(ctx, task, func(sm callbacks.StateMachine) {
 		if err != nil {
-			sm.Event(ctx, callbacks.EventAttemptFailed, err)
+			sm.Event(ctx, callbacks.EventAttemptFailed)
 			return
 		}
 		if response.StatusCode >= 200 && response.StatusCode < 300 {
-			sm.Event(ctx, callbacks.EventSucceeded, err)
+			sm.Event(ctx, callbacks.EventSucceeded)
 			return
 		}
 		// TODO: get exact non retryable vs. retryable error codes
@@ -215,7 +215,7 @@ func (t *callbackQueueActiveTaskExecutor) processNexusCallbackTask(ctx context.C
 			sm.Event(ctx, callbacks.EventFailed, err)
 			// TODO: schedule a backoff timer
 		} else {
-			sm.Event(ctx, callbacks.EventAttemptFailed, fmt.Errorf("Request failed with: %v", response.StatusCode))
+			sm.Event(ctx, callbacks.EventAttemptFailed, fmt.Errorf("request failed with: %v", response.Status))
 		}
 
 	})

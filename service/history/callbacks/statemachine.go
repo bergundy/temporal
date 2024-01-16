@@ -95,13 +95,21 @@ func NewStateMachine(id string, data *persistencespb.CallbackInfo, env statemach
 				}
 				sm.Data.Inner.State = state
 			},
-			"after_" + EventScheduled:                            sm.AfterScheduled,
 			"leave_" + enumspb.CALLBACK_STATE_SCHEDULED.String(): sm.LeaveScheduled,
+			"after_" + EventScheduled:                            sm.AfterScheduled,
 			"after_" + EventAttemptFailed:                        sm.AfterAttemptFailed,
 			"after_" + EventFailed:                               sm.AfterFailed,
 		},
 	)
 	return sm
+}
+
+// LeaveScheduled resets all of previous attempt's information
+func (m *StateMachine) LeaveScheduled(ctx context.Context, e *fsm.Event) {
+	m.Data.Inner.Attempt++
+	m.Data.Inner.NextAttemptScheduleTime = nil
+	m.Data.Inner.LastAttemptCompleteTime = timestamppb.New(m.env.GetCurrentTime())
+	m.Data.Inner.LastAttemptFailure = nil
 }
 
 func (m *StateMachine) AfterScheduled(ctx context.Context, e *fsm.Event) {
@@ -129,18 +137,10 @@ func (m *StateMachine) AfterScheduled(ctx context.Context, e *fsm.Event) {
 	})
 }
 
-// LeaveScheduled resets all of previous attempt's information
-func (m *StateMachine) LeaveScheduled(ctx context.Context, e *fsm.Event) {
-	m.Data.Inner.Attempt++
-	m.Data.Inner.NextAttemptScheduleTime = nil
-	m.Data.Inner.LastAttemptFailure = nil
-	m.Data.Inner.LastAttemptCompleteTime = timestamppb.New(m.env.GetCurrentTime())
-}
-
 func (m *StateMachine) AfterAttemptFailed(ctx context.Context, e *fsm.Event) {
-	nextAttemptTime := m.env.GetCurrentTime().Add(backoff.NewExponentialRetryPolicy(time.Second).ComputeNextDelay(0, int(m.Data.Inner.Attempt)))
 	err := e.Args[0].(error)
-	m.Data.Inner.NextAttemptScheduleTime = timestamppb.New(nextAttemptTime)
+	nextDelay := backoff.NewExponentialRetryPolicy(time.Second).ComputeNextDelay(0, int(m.Data.Inner.Attempt))
+	m.Data.Inner.NextAttemptScheduleTime = timestamppb.New(m.env.GetCurrentTime().Add(nextDelay))
 	m.Data.Inner.LastAttemptFailure = &failurepb.Failure{
 		Message: err.Error(),
 		// TODO: ServerFailureInfo or ApplicationFailureInfo?
@@ -160,9 +160,9 @@ func (m *StateMachine) AfterAttemptFailed(ctx context.Context, e *fsm.Event) {
 }
 
 func (m *StateMachine) AfterFailed(ctx context.Context, e *fsm.Event) {
-	message := e.Args[0].(string)
+	err := e.Args[0].(error)
 	m.Data.Inner.LastAttemptFailure = &failurepb.Failure{
-		Message: message,
+		Message: err.Error(),
 		FailureInfo: &failurepb.Failure_ServerFailureInfo{
 			// TODO: ServerFailureInfo or ApplicationFailureInfo?
 			ServerFailureInfo: &failurepb.ServerFailureInfo{

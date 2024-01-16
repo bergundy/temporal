@@ -458,8 +458,9 @@ func (ms *MutableStateImpl) Schedule(task statemachines.Task) {
 			Attempt:             t.ScheduleAttempt,
 			CallbackID:          t.CallbackId,
 		})
+	default:
+		panic(fmt.Errorf("don't know how to schedule %v", task))
 	}
-	panic(fmt.Errorf("don't know how to schedule %v", task))
 }
 
 func (ms *MutableStateImpl) CloneToProto() *persistencespb.WorkflowMutableState {
