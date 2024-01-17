@@ -207,7 +207,7 @@ func (t *callbackQueueActiveTaskExecutor) processNexusCallbackTask(ctx context.C
 			return nil
 		}
 		if err != nil {
-			return sm.Event(ctx, callbacks.EventAttemptFailed)
+			return sm.Event(ctx, callbacks.EventAttemptFailed, err)
 		}
 		if response.StatusCode >= 200 && response.StatusCode < 300 {
 			return sm.Event(ctx, callbacks.EventSucceeded)

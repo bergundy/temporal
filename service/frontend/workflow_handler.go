@@ -29,6 +29,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -47,8 +48,10 @@ import (
 	updatepb "go.temporal.io/api/update/v1"
 	workflowpb "go.temporal.io/api/workflow/v1"
 	"go.temporal.io/api/workflowservice/v1"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -397,6 +400,20 @@ func (wh *WorkflowHandler) StartWorkflowExecution(ctx context.Context, request *
 
 	if err = wh.validateSearchAttributes(request.GetSearchAttributes(), namespaceName); err != nil {
 		return nil, err
+	}
+
+	for _, callback := range request.GetCompletionCallbacks() {
+		if callback, ok := callback.GetVariant().(*commonpb.Callback_Nexus_); ok {
+			u, err := url.Parse(callback.Nexus.GetUrl())
+			if err != nil {
+				return nil, status.Errorf(codes.InvalidArgument, "invalid url: %v", err)
+			}
+			if !(u.Scheme == "http" || u.Scheme == "https") {
+				return nil, status.Errorf(codes.InvalidArgument, "invalid url scheme: %v", u)
+			}
+			// TODO: check in dynamic config that address is valid and that http is only accepted insecure is
+			// allowed for address.
+		}
 	}
 
 	enums.SetDefaultWorkflowIdReusePolicy(&request.WorkflowIdReusePolicy)
