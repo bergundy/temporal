@@ -10,14 +10,15 @@ import (
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	failurepb "go.temporal.io/api/failure/v1"
-	"go.temporal.io/server/api/enums/v1"
 	persistencespb "go.temporal.io/server/api/persistence/v1"
 	"go.temporal.io/server/common/backoff"
 	"go.temporal.io/server/service/history/statemachines"
+	"go.temporal.io/server/service/history/tasks"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type StateMachine struct {
+	// ID in the mutables state's WorkflowExecutionInfo Callbacks array.
 	ID  string
 	env statemachines.Environment
 	*fsm.FSM
@@ -37,7 +38,7 @@ const (
 func NewStateMachine(id string, data *persistencespb.CallbackInfo, env statemachines.Environment) StateMachine {
 	sm := StateMachine{ID: id, env: env, Data: data}
 	sm.FSM = fsm.NewFSM(
-		data.Inner.State.String(),
+		data.PublicInfo.State.String(),
 		fsm.Events{
 			// {
 			// 	Name: EventInitialized,
@@ -93,7 +94,7 @@ func NewStateMachine(id string, data *persistencespb.CallbackInfo, env statemach
 					// Intentional, force states to be defined in protos.
 					panic(err)
 				}
-				sm.Data.Inner.State = state
+				sm.Data.PublicInfo.State = state
 			},
 			"leave_" + enumspb.CALLBACK_STATE_SCHEDULED.String(): sm.LeaveScheduled,
 			"after_" + EventScheduled:                            sm.AfterScheduled,
@@ -106,67 +107,61 @@ func NewStateMachine(id string, data *persistencespb.CallbackInfo, env statemach
 
 // LeaveScheduled resets all of previous attempt's information
 func (m *StateMachine) LeaveScheduled(ctx context.Context, e *fsm.Event) {
-	m.Data.Inner.Attempt++
-	m.Data.Inner.NextAttemptScheduleTime = nil
-	m.Data.Inner.LastAttemptCompleteTime = timestamppb.New(m.env.GetCurrentTime())
-	m.Data.Inner.LastAttemptFailure = nil
+	m.Data.PublicInfo.Attempt++
+	m.Data.PublicInfo.NextAttemptScheduleTime = nil
+	m.Data.PublicInfo.LastAttemptCompleteTime = timestamppb.New(m.env.GetCurrentTime())
+	m.Data.PublicInfo.LastAttemptFailure = nil
 }
 
 func (m *StateMachine) AfterScheduled(ctx context.Context, e *fsm.Event) {
 	var destination string
 	// TODO: URLs need to be validated in the frontend
-	switch v := m.Data.Inner.Callback.GetVariant().(type) {
+	switch v := m.Data.PublicInfo.Callback.GetVariant().(type) {
 	case *commonpb.Callback_Nexus_:
-		u, err := url.Parse(m.Data.Inner.Callback.GetNexus().Url)
+		u, err := url.Parse(m.Data.PublicInfo.Callback.GetNexus().Url)
 		if err != nil {
-			panic(fmt.Errorf("failed to parse URL: %v", &m.Data.Inner))
+			panic(fmt.Errorf("failed to parse URL: %v", &m.Data.PublicInfo))
 		}
 		destination = u.Host
 	default:
 		panic(fmt.Errorf("unsupported callback variant %v", v))
 	}
 
-	m.env.Schedule(statemachines.Task{
-		Type: enums.TASK_TYPE_CALLBACK,
-		Data: &persistencespb.CallbackTaskInfo{
-			// Should be set by the framework?
-			CallbackId:         m.ID,
-			Attempt:            m.Data.Inner.Attempt,
-			DestinationAddress: destination,
-		},
+	m.env.Schedule(&tasks.CallbackTask{
+		CallbackID:         m.ID,
+		Attempt:            m.Data.PublicInfo.Attempt,
+		DestinationAddress: destination,
 	})
 }
 
 func (m *StateMachine) AfterAttemptFailed(ctx context.Context, e *fsm.Event) {
 	err := e.Args[0].(error)
-	nextDelay := backoff.NewExponentialRetryPolicy(time.Second).ComputeNextDelay(0, int(m.Data.Inner.Attempt))
-	m.Data.Inner.NextAttemptScheduleTime = timestamppb.New(m.env.GetCurrentTime().Add(nextDelay))
-	m.Data.Inner.LastAttemptFailure = &failurepb.Failure{
+	// Use 0 for elapsed time as we don't limit the retry by time (for now).
+	nextDelay := backoff.NewExponentialRetryPolicy(time.Second).ComputeNextDelay(0, int(m.Data.PublicInfo.Attempt))
+	nextAttemptScheduleTime := m.env.GetCurrentTime().Add(nextDelay)
+	m.Data.PublicInfo.NextAttemptScheduleTime = timestamppb.New(nextAttemptScheduleTime)
+	m.Data.PublicInfo.LastAttemptFailure = &failurepb.Failure{
 		Message: err.Error(),
 		// TODO: ServerFailureInfo or ApplicationFailureInfo?
 		FailureInfo: &failurepb.Failure_ServerFailureInfo{
 			ServerFailureInfo: &failurepb.ServerFailureInfo{},
 		},
 	}
-	m.env.Schedule(statemachines.Task{
-		Type: enums.TASK_TYPE_CALLBACK_BACKOFF,
-		Data: &persistencespb.TimerTaskInfo{
-			CallbackId:      m.ID,
-			ScheduleAttempt: m.Data.Inner.Attempt,
-			// // Use 0 for elapsed time as we don't limit the retry by time (for now).
-			VisibilityTime: m.Data.Inner.NextAttemptScheduleTime,
-		},
+	m.env.Schedule(&tasks.CallbackBackoffTask{
+		CallbackID:          m.ID,
+		Attempt:             m.Data.PublicInfo.Attempt,
+		VisibilityTimestamp: nextAttemptScheduleTime,
 	})
 }
 
 func (m *StateMachine) AfterFailed(ctx context.Context, e *fsm.Event) {
 	err := e.Args[0].(error)
-	m.Data.Inner.LastAttemptFailure = &failurepb.Failure{
+	m.Data.PublicInfo.LastAttemptFailure = &failurepb.Failure{
 		Message: err.Error(),
 		FailureInfo: &failurepb.Failure_ServerFailureInfo{
 			// TODO: ServerFailureInfo or ApplicationFailureInfo?
 			ServerFailureInfo: &failurepb.ServerFailureInfo{
-				NonRetryable: m.Data.Inner.State == enumspb.CALLBACK_STATE_FAILED,
+				NonRetryable: m.Data.PublicInfo.State == enumspb.CALLBACK_STATE_FAILED,
 			},
 		},
 	}

@@ -230,7 +230,7 @@ func Invoke(
 	}
 	result.Callbacks = make([]*workflowpb.CallbackInfo, 0, len(mutableState.GetExecutionInfo().GetCallbacks()))
 	for _, callback := range mutableState.GetExecutionInfo().GetCallbacks() {
-		result.Callbacks = append(result.Callbacks, callback.Inner)
+		result.Callbacks = append(result.Callbacks, callback.PublicInfo)
 	}
 
 	return result, nil

@@ -1170,7 +1170,7 @@ func (s *TaskSerializer) callbackTaskToProto(task *tasks.CallbackTask) *persiste
 		VisibilityTime:     timestamppb.New(task.VisibilityTimestamp),
 		CallbackId:         task.CallbackID,
 		DestinationAddress: task.DestinationAddress,
-		Attempt:            task.Attempt,
+		ScheduleAttempt:    task.Attempt,
 	}
 }
 
@@ -1197,7 +1197,7 @@ func (s *TaskSerializer) callbackTaskFromProto(task *persistencespb.CallbackTask
 		TaskID:              task.TaskId,
 		CallbackID:          task.CallbackId,
 		DestinationAddress:  task.DestinationAddress,
-		Attempt:             task.Attempt,
+		Attempt:             task.ScheduleAttempt,
 	}
 }
 

@@ -439,25 +439,17 @@ func (ms *MutableStateImpl) GetCurrentTime() time.Time {
 	return ms.shard.GetCurrentTime(ms.shard.GetClusterMetadata().GetCurrentClusterName())
 }
 
-func (ms *MutableStateImpl) Schedule(task statemachines.Task) {
-	switch t := task.Data.(type) {
-	case *persistencespb.CallbackTaskInfo:
-		ms.AddTasks(&tasks.CallbackTask{
-			// TaskID and VisibilityTimestamp are set by shard
-			WorkflowKey:        ms.GetWorkflowKey(),
-			Version:            ms.GetVersion(),
-			CallbackID:         t.CallbackId,
-			Attempt:            t.Attempt,
-			DestinationAddress: t.DestinationAddress,
-		})
-	case *persistencespb.TimerTaskInfo:
-		ms.AddTasks(&tasks.CallbackBackoffTask{
-			WorkflowKey:         ms.GetWorkflowKey(),
-			Version:             ms.GetVersion(),
-			VisibilityTimestamp: t.VisibilityTime.AsTime(),
-			Attempt:             t.ScheduleAttempt,
-			CallbackID:          t.CallbackId,
-		})
+func (ms *MutableStateImpl) Schedule(task tasks.Task) {
+	// TODO: there should be a better way to do this.
+	switch t := task.(type) {
+	case *tasks.CallbackTask:
+		t.WorkflowKey = ms.GetWorkflowKey()
+		t.Version = ms.GetVersion()
+		ms.AddTasks(t)
+	case *tasks.CallbackBackoffTask:
+		t.WorkflowKey = ms.GetWorkflowKey()
+		t.Version = ms.GetVersion()
+		ms.AddTasks(t)
 	default:
 		panic(fmt.Errorf("don't know how to schedule %v", task))
 	}
@@ -1881,11 +1873,15 @@ func (ms *MutableStateImpl) ApplyWorkflowExecutionStartedEvent(
 	ms.executionInfo.DefaultWorkflowTaskTimeout = event.GetWorkflowTaskTimeout()
 
 	ms.executionInfo.Callbacks = make(map[string]*persistencespb.CallbackInfo, len(event.GetCompletionCallbacks()))
-	for _, cb := range event.GetCompletionCallbacks() {
-		callbackID := uuid.New()
-		ms.executionInfo.Callbacks[callbackID] = &persistencespb.CallbackInfo{
+	for idx, cb := range event.GetCompletionCallbacks() {
+		// Use the start event version and history size as part of the callback ID to ensure that callbacks have
+		// unique IDs that are deterministically created across clusters.
+		// TODO: consider replicating the "initiated" event and allocating a uuid there instead of relying on
+		// history event replication.
+		id := fmt.Sprintf("%d-%d-%d", startEvent.GetVersion(), ms.GetHistorySize(), idx)
+		ms.executionInfo.Callbacks[id] = &persistencespb.CallbackInfo{
 			Version: ms.currentVersion,
-			Inner: &workflowpb.CallbackInfo{
+			PublicInfo: &workflowpb.CallbackInfo{
 				Trigger: &workflowpb.CallbackInfo_Trigger{
 					Variant: &workflowpb.CallbackInfo_Trigger_WorkflowClosed{},
 				},
@@ -3778,7 +3774,7 @@ func (ms *MutableStateImpl) AddContinueAsNewEvent(
 	}
 	// Copy over close callbacks to the next execution.
 	for id, cb := range ms.executionInfo.Callbacks {
-		if _, ok := cb.Inner.GetTrigger().GetVariant().(*workflowpb.CallbackInfo_Trigger_WorkflowClosed); ok {
+		if _, ok := cb.PublicInfo.GetTrigger().GetVariant().(*workflowpb.CallbackInfo_Trigger_WorkflowClosed); ok {
 			newMutableState.executionInfo.Callbacks[id] = cb
 		}
 	}
@@ -4663,7 +4659,7 @@ func (ms *MutableStateImpl) GenerateMigrationTasks() ([]tasks.Task, int64, error
 
 func (ms *MutableStateImpl) processCallbacks() error {
 	for id, cb := range ms.GetExecutionInfo().GetCallbacks() {
-		switch cb.Inner.Trigger.GetVariant().(type) {
+		switch cb.PublicInfo.Trigger.GetVariant().(type) {
 		case *workflowpb.CallbackInfo_Trigger_WorkflowClosed:
 			if ms.GetExecutionState().GetState() == enumsspb.WORKFLOW_EXECUTION_STATE_COMPLETED && ms.GetExecutionState().GetStatus() != enumspb.WORKFLOW_EXECUTION_STATUS_CONTINUED_AS_NEW {
 				// TODO: implement BLOCKED

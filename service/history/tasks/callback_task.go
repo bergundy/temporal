@@ -41,7 +41,7 @@ type (
 		// This destination address for the callback.
 		// Used to associate the callback with an executor.
 		DestinationAddress string
-		// Index in mutable state's callback map.
+		// Key in mutable state's callback map.
 		CallbackID string
 		// The attempt - should match the mutable state callback info.
 		Attempt int32

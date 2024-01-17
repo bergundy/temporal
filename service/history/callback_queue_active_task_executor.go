@@ -156,15 +156,15 @@ func (t *callbackQueueActiveTaskExecutor) processCallbackTask(
 	if err = CheckTaskVersion(t.shard, t.logger, mutableState.GetNamespaceEntry(), callback.Version, task.Version, task); err != nil {
 		return err
 	}
-	if callback.Inner.State != enumspb.CALLBACK_STATE_SCHEDULED {
+	if callback.PublicInfo.State != enumspb.CALLBACK_STATE_SCHEDULED {
 		// TODO: think about the error returned here
 		return fmt.Errorf("invalid callback state for task")
 	}
-	// if callback.Inner.Attempt != task.Attempt {
+	// if callback.PublicInfo.Attempt != task.Attempt {
 	// 	return fmt.Errorf("invalid callback attempt for task")
 	// }
 
-	switch variant := callback.GetInner().GetCallback().GetVariant().(type) {
+	switch variant := callback.PublicInfo.GetCallback().GetVariant().(type) {
 	case *commonpb.Callback_Nexus_:
 		completion, err := t.getNexusCompletion(ctx, mutableState)
 		if err != nil {
@@ -201,30 +201,29 @@ func (t *callbackQueueActiveTaskExecutor) processNexusCallbackTask(ctx context.C
 		return err
 	}
 	response, err := http.DefaultClient.Do(request)
-	return t.updateCallbackState(ctx, task, func(sm callbacks.StateMachine) {
+	return t.updateCallbackState(ctx, task, func(sm callbacks.StateMachine) error {
+		// Callback was already modified while the task was executing, drop this attempt.
+		if !sm.Is(enumspb.CALLBACK_STATE_SCHEDULED.String()) {
+			return nil
+		}
 		if err != nil {
-			sm.Event(ctx, callbacks.EventAttemptFailed)
-			return
+			return sm.Event(ctx, callbacks.EventAttemptFailed)
 		}
 		if response.StatusCode >= 200 && response.StatusCode < 300 {
-			sm.Event(ctx, callbacks.EventSucceeded)
-			return
+			return sm.Event(ctx, callbacks.EventSucceeded)
 		}
 		// TODO: get exact non retryable vs. retryable error codes
 		if response.StatusCode >= 400 && response.StatusCode < 500 {
-			sm.Event(ctx, callbacks.EventFailed, err)
-			// TODO: schedule a backoff timer
-		} else {
-			sm.Event(ctx, callbacks.EventAttemptFailed, fmt.Errorf("request failed with: %v", response.Status))
+			return sm.Event(ctx, callbacks.EventFailed, err)
 		}
-
+		return sm.Event(ctx, callbacks.EventAttemptFailed, fmt.Errorf("request failed with: %v", response.Status))
 	})
 }
 
 func (t *callbackQueueActiveTaskExecutor) updateCallbackState(
 	ctx context.Context,
 	task *tasks.CallbackTask,
-	updateCallbackFn func(callbacks.StateMachine),
+	updateCallbackFn func(callbacks.StateMachine) error,
 ) (retErr error) {
 	weContext, release, err := getWorkflowExecutionContextForTask(ctx, t.shard, t.workflowCache, task)
 	if err != nil {
@@ -234,13 +233,14 @@ func (t *callbackQueueActiveTaskExecutor) updateCallbackState(
 
 	return t.updateWorkflowExecution(ctx, weContext, func(ms workflow.MutableState) error {
 		// TODO: This should probably move to mutable state
-		outer := ms.GetExecutionInfo().GetCallbacks()[task.CallbackID]
+		callback, ok := ms.GetExecutionInfo().GetCallbacks()[task.CallbackID]
+		if !ok {
+			panic("TODO")
+		}
 		// TODO: Remove this cast
-		sm := callbacks.NewStateMachine(task.CallbackID, outer, ms.(*workflow.MutableStateImpl))
-		updateCallbackFn(sm)
+		sm := callbacks.NewStateMachine(task.CallbackID, callback, ms.(*workflow.MutableStateImpl))
 		// TODO: replication task
-		// t.shard.GetNamespaceRegistry().GetNamespaceByID(namespace.ID(task.GetNamespaceID()))
-		return nil
+		return updateCallbackFn(sm)
 	})
 }
 

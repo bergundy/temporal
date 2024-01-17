@@ -27,7 +27,6 @@ package history
 import (
 	"context"
 	"fmt"
-	"net/url"
 
 	"github.com/pborman/uuid"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -50,6 +49,7 @@ import (
 	"go.temporal.io/server/common/primitives/timestamp"
 	"go.temporal.io/server/common/resource"
 	"go.temporal.io/server/common/worker_versioning"
+	"go.temporal.io/server/service/history/callbacks"
 	"go.temporal.io/server/service/history/configs"
 	"go.temporal.io/server/service/history/consts"
 	"go.temporal.io/server/service/history/deletemanager"
@@ -170,28 +170,24 @@ func (t *timerQueueActiveTaskExecutor) executeCallbackBackoffTask(
 		return consts.ErrWorkflowExecutionNotFound
 	}
 
-	callback := mutableState.GetExecutionInfo().GetCallbacks()[task.CallbackID]
-	// TODO: move this code out of the executor
-	// TODO: compare Version and Attempt
-	// TODO: update callback.Version
-	// TODO: check callback is not blocked (not implemented yet)
-	callback.Inner.State = enumspb.CALLBACK_STATE_SCHEDULED
-	// TODO: handle (hypopthetical) non nexus callbacks
-	u, err := url.Parse(callback.Inner.Callback.GetNexus().Url)
-	if err != nil {
-		return serviceerror.NewInternal(fmt.Sprintf("failed to parse URL: %v", callback))
+	callback, ok := mutableState.GetExecutionInfo().GetCallbacks()[task.CallbackID]
+	if !ok {
+		// TODO: think about the error returned here
+		return fmt.Errorf("invalid callback ID for task")
 	}
-	mutableState.AddTasks(&tasks.CallbackTask{
-		// TaskID and VisibilityTimestamp are set by shard
-		WorkflowKey:        mutableState.GetWorkflowKey(),
-		Version:            callback.Version,
-		CallbackID:         task.CallbackID,
-		Attempt:            callback.Inner.Attempt,
-		DestinationAddress: u.Host,
-	})
-
+	// TODO: Remove this cast
+	sm := callbacks.NewStateMachine(task.CallbackID, callback, mutableState.(*workflow.MutableStateImpl))
+	// TODO: compare Version and Attempt
+	// TODO: check callback is not blocked (not implemented yet)
+	if !sm.Can(callbacks.EventScheduled) {
+		// TODO: error for stale task
+	}
+	if err := sm.Event(ctx, callbacks.EventScheduled); err != nil {
+		return err
+	}
 	return weContext.UpdateWorkflowExecutionAsActive(ctx, t.shardContext)
 }
+
 func (t *timerQueueActiveTaskExecutor) executeUserTimerTimeoutTask(
 	ctx context.Context,
 	task *tasks.UserTimerTask,

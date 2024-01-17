@@ -38,7 +38,7 @@ type (
 		TaskID              int64
 		EventID             int64
 		Version             int64
-		// Index in mutable state's callback map.
+		// Key in mutable state's callback map.
 		CallbackID string
 		// The attempt - should match the mutable state callback info.
 		Attempt int32

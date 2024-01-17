@@ -4,6 +4,7 @@ import (
 	"time"
 
 	enumsspb "go.temporal.io/server/api/enums/v1"
+	"go.temporal.io/server/service/history/tasks"
 )
 
 type Task struct {
@@ -14,6 +15,6 @@ type Task struct {
 
 type Environment interface {
 	GetVersion() int64
-	Schedule(task Task)
+	Schedule(task tasks.Task)
 	GetCurrentTime() time.Time
 }
