@@ -531,9 +531,12 @@ func (e *executableImpl) SetScheduledTime(t time.Time) {
 	e.scheduledTime = t
 }
 
+// GetDestination returns the embedded task's destination if it exists. Defaults to an empty string.
 func (e *executableImpl) GetDestination() string {
-	// for now it's okay to panic, consider changing this
-	return e.Task.(tasks.HasDestination).GetDestination()
+	if t, ok := e.Task.(tasks.HasDestination); ok {
+		return t.GetDestination()
+	}
+	return ""
 }
 
 func (e *executableImpl) shouldResubmitOnNack(attempt int, err error) bool {

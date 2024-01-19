@@ -175,8 +175,7 @@ func (t *timerQueueActiveTaskExecutor) executeCallbackBackoffTask(
 		// TODO: think about the error returned here
 		return fmt.Errorf("invalid callback ID for task")
 	}
-	// TODO: Remove this cast
-	sm := callbacks.NewStateMachine(task.CallbackID, callback, mutableState.(*workflow.MutableStateImpl))
+	sm := callbacks.NewStateMachine(task.CallbackID, callback, mutableState)
 	// TODO: compare Version and Attempt
 	// TODO: check callback is not blocked (not implemented yet)
 	if !sm.Can(callbacks.EventScheduled) {

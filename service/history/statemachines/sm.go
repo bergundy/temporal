@@ -8,7 +8,7 @@ import (
 
 type Environment interface {
 	GetVersion() int64
-	Schedule(task tasks.Task)
+	Schedule(task tasks.PartialTask)
 	GetCurrentTime() time.Time
 }
 
@@ -32,7 +32,7 @@ func (m *MockEnvironment) GetVersion() int64 {
 }
 
 // Schedule implements Environment.
-func (m *MockEnvironment) Schedule(task tasks.Task) {
+func (m *MockEnvironment) Schedule(task tasks.PartialTask) {
 	m.ScheduledTasks = append(m.ScheduledTasks, task)
 }
 

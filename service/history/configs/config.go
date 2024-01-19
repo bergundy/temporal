@@ -583,7 +583,7 @@ func NewConfig(
 		VisibilityProcessorPollBackoffInterval:                dc.GetDurationProperty(dynamicconfig.VisibilityProcessorPollBackoffInterval, 5*time.Second),
 		VisibilityProcessorEnsureCloseBeforeDelete:            dc.GetBoolProperty(dynamicconfig.VisibilityProcessorEnsureCloseBeforeDelete, false),
 		VisibilityProcessorEnableCloseWorkflowCleanup:         dc.GetBoolPropertyFnWithNamespaceFilter(dynamicconfig.VisibilityProcessorEnableCloseWorkflowCleanup, false),
-		VisibilityQueueMaxReaderCount:                         dc.GetIntProperty(dynamicconfig.VisibilityProcessorEnableCloseWorkflowCleanup, 2),
+		VisibilityQueueMaxReaderCount:                         dc.GetIntProperty(dynamicconfig.VisibilityQueueMaxReaderCount, 2),
 
 		SearchAttributesNumberOfKeysLimit: dc.GetIntPropertyFilteredByNamespace(dynamicconfig.SearchAttributesNumberOfKeysLimit, 100),
 		SearchAttributesSizeOfValueLimit:  dc.GetIntPropertyFilteredByNamespace(dynamicconfig.SearchAttributesSizeOfValueLimit, 2*1024),
@@ -618,7 +618,7 @@ func NewConfig(
 		ArchivalProcessorPollBackoffInterval: dc.GetDurationProperty(dynamicconfig.ArchivalProcessorPollBackoffInterval, 5*time.Second),
 		ArchivalProcessorArchiveDelay:        dc.GetDurationProperty(dynamicconfig.ArchivalProcessorArchiveDelay, 5*time.Minute),
 		ArchivalBackendMaxRPS:                dc.GetFloat64Property(dynamicconfig.ArchivalBackendMaxRPS, 10000.0),
-		ArchivalQueueMaxReaderCount:          dc.GetIntProperty(dynamicconfig.ArchivalBackendMaxRPS, 2),
+		ArchivalQueueMaxReaderCount:          dc.GetIntProperty(dynamicconfig.ArchivalQueueMaxReaderCount, 2),
 
 		// workflow update related
 		WorkflowExecutionMaxInFlightUpdates: dc.GetIntPropertyFilteredByNamespace(dynamicconfig.WorkflowExecutionMaxInFlightUpdates, 10),

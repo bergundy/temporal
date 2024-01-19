@@ -77,7 +77,6 @@ import (
 	"go.temporal.io/server/service/history/events"
 	"go.temporal.io/server/service/history/historybuilder"
 	"go.temporal.io/server/service/history/shard"
-	"go.temporal.io/server/service/history/statemachines"
 	"go.temporal.io/server/service/history/tasks"
 )
 
@@ -204,7 +203,6 @@ type (
 )
 
 var _ MutableState = (*MutableStateImpl)(nil)
-var _ statemachines.Environment = (*MutableStateImpl)(nil)
 
 func NewMutableState(
 	shard shard.Context,
@@ -439,20 +437,10 @@ func (ms *MutableStateImpl) GetCurrentTime() time.Time {
 	return ms.shard.GetCurrentTime(ms.shard.GetClusterMetadata().GetCurrentClusterName())
 }
 
-func (ms *MutableStateImpl) Schedule(task tasks.Task) {
-	// TODO: there should be a better way to do this.
-	switch t := task.(type) {
-	case *tasks.CallbackTask:
-		t.WorkflowKey = ms.GetWorkflowKey()
-		t.Version = ms.GetVersion()
-		ms.AddTasks(t)
-	case *tasks.CallbackBackoffTask:
-		t.WorkflowKey = ms.GetWorkflowKey()
-		t.Version = ms.GetVersion()
-		ms.AddTasks(t)
-	default:
-		panic(fmt.Errorf("don't know how to schedule %v", task))
-	}
+func (ms *MutableStateImpl) Schedule(task tasks.PartialTask) {
+	task.SetWorkflowKey(ms.GetWorkflowKey())
+	task.SetVersion(ms.GetVersion())
+	ms.AddTasks(task)
 }
 
 func (ms *MutableStateImpl) CloneToProto() *persistencespb.WorkflowMutableState {

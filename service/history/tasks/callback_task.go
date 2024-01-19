@@ -29,7 +29,7 @@ import (
 	"go.temporal.io/server/common/definition"
 )
 
-var _ Task = (*CallbackTask)(nil)
+var _ PartialTask = (*CallbackTask)(nil)
 var _ HasDestination = (*CallbackTask)(nil)
 
 type (
@@ -47,6 +47,10 @@ type (
 		Attempt int32
 	}
 )
+
+func (t *CallbackTask) SetWorkflowKey(key definition.WorkflowKey) {
+	t.WorkflowKey = key
+}
 
 // GetDestination implements HasDestination.
 func (t *CallbackTask) GetDestination() string {

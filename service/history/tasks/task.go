@@ -31,6 +31,7 @@ import (
 
 	enumsspb "go.temporal.io/server/api/enums/v1"
 	"go.temporal.io/server/common"
+	"go.temporal.io/server/common/definition"
 )
 
 type (
@@ -52,6 +53,13 @@ type (
 
 	HasDestination interface {
 		GetDestination() string
+	}
+
+	// TODO: document and consider a better name
+	PartialTask interface {
+		Task
+		SetWorkflowKey(definition.WorkflowKey)
+		SetVersion(int64)
 	}
 )
 

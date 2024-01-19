@@ -1787,6 +1787,20 @@ func (mr *MockMutableStateMockRecorder) GetCurrentBranchToken() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCurrentBranchToken", reflect.TypeOf((*MockMutableState)(nil).GetCurrentBranchToken))
 }
 
+// GetCurrentTime mocks base method.
+func (m *MockMutableState) GetCurrentTime() time.Time {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetCurrentTime")
+	ret0, _ := ret[0].(time.Time)
+	return ret0
+}
+
+// GetCurrentTime indicates an expected call of GetCurrentTime.
+func (mr *MockMutableStateMockRecorder) GetCurrentTime() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCurrentTime", reflect.TypeOf((*MockMutableState)(nil).GetCurrentTime))
+}
+
 // GetCurrentVersion mocks base method.
 func (m *MockMutableState) GetCurrentVersion() int64 {
 	m.ctrl.T.Helper()
@@ -2221,6 +2235,20 @@ func (mr *MockMutableStateMockRecorder) GetUserTimerInfoByEventID(arg0 interface
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetUserTimerInfoByEventID", reflect.TypeOf((*MockMutableState)(nil).GetUserTimerInfoByEventID), arg0)
 }
 
+// GetVersion mocks base method.
+func (m *MockMutableState) GetVersion() int64 {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetVersion")
+	ret0, _ := ret[0].(int64)
+	return ret0
+}
+
+// GetVersion indicates an expected call of GetVersion.
+func (mr *MockMutableStateMockRecorder) GetVersion() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetVersion", reflect.TypeOf((*MockMutableState)(nil).GetVersion))
+}
+
 // GetWorkerVersionStamp mocks base method.
 func (m *MockMutableState) GetWorkerVersionStamp() *v10.WorkerVersionStamp {
 	m.ctrl.T.Helper()
@@ -2584,6 +2612,18 @@ func (m *MockMutableState) RetryActivity(ai *v112.ActivityInfo, failure *v12.Fai
 func (mr *MockMutableStateMockRecorder) RetryActivity(ai, failure interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RetryActivity", reflect.TypeOf((*MockMutableState)(nil).RetryActivity), ai, failure)
+}
+
+// Schedule mocks base method.
+func (m *MockMutableState) Schedule(task tasks.PartialTask) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "Schedule", task)
+}
+
+// Schedule indicates an expected call of Schedule.
+func (mr *MockMutableStateMockRecorder) Schedule(task interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Schedule", reflect.TypeOf((*MockMutableState)(nil).Schedule), task)
 }
 
 // SetBaseWorkflow mocks base method.

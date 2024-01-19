@@ -389,6 +389,6 @@ message Checksum {
 
 message CallbackInfo {
     // The namespace failover version at the time this callback info was updated.
-    int64 version = 1; 
+    int64 version = 1;
     temporal.api.workflow.v1.CallbackInfo public_info = 2;
 }

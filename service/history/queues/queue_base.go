@@ -196,8 +196,7 @@ func newQueueBase(
 
 		slices := make([]Slice, 0, len(scopes))
 		for _, scope := range scopes {
-			// TODO: make grouper configurable
-			slices = append(slices, NewSlice(paginationFnProvider, executableFactory, monitor, scope, GrouperNamespaceID{}))
+			slices = append(slices, NewSlice(paginationFnProvider, executableFactory, monitor, scope, grouper))
 		}
 		if _, err := readerGroup.NewReader(readerID, slices...); err != nil {
 			// we are not able to re-create the scopes & readers we previously have

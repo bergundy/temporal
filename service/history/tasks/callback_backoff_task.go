@@ -29,7 +29,7 @@ import (
 	"go.temporal.io/server/common/definition"
 )
 
-var _ Task = (*CallbackBackoffTask)(nil)
+var _ PartialTask = (*CallbackBackoffTask)(nil)
 
 type (
 	CallbackBackoffTask struct {
@@ -44,6 +44,10 @@ type (
 		Attempt int32
 	}
 )
+
+func (t *CallbackBackoffTask) SetWorkflowKey(key definition.WorkflowKey) {
+	t.WorkflowKey = key
+}
 
 func (t *CallbackBackoffTask) GetKey() Key {
 	return NewKey(t.VisibilityTimestamp, t.TaskID)

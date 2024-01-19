@@ -232,13 +232,11 @@ func (t *callbackQueueActiveTaskExecutor) updateCallbackState(
 	defer func() { release(retErr) }()
 
 	return t.updateWorkflowExecution(ctx, weContext, func(ms workflow.MutableState) error {
-		// TODO: This should probably move to mutable state
 		callback, ok := ms.GetExecutionInfo().GetCallbacks()[task.CallbackID]
 		if !ok {
 			panic("TODO")
 		}
-		// TODO: Remove this cast
-		sm := callbacks.NewStateMachine(task.CallbackID, callback, ms.(*workflow.MutableStateImpl))
+		sm := callbacks.NewStateMachine(task.CallbackID, callback, ms)
 		// TODO: replication task
 		return updateCallbackFn(sm)
 	})
