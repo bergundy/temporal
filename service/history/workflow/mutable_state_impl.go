@@ -26,6 +26,7 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"time"
@@ -77,6 +78,7 @@ import (
 	"go.temporal.io/server/service/history/events"
 	"go.temporal.io/server/service/history/historybuilder"
 	"go.temporal.io/server/service/history/shard"
+	"go.temporal.io/server/service/history/statemachines"
 	"go.temporal.io/server/service/history/tasks"
 )
 
@@ -1869,6 +1871,7 @@ func (ms *MutableStateImpl) ApplyWorkflowExecutionStartedEvent(
 		id := fmt.Sprintf("%d-%d-%d", startEvent.GetVersion(), ms.GetHistorySize(), idx)
 		ms.executionInfo.Callbacks[id] = &persistencespb.CallbackInfo{
 			Version: ms.currentVersion,
+			Id:      id,
 			PublicInfo: &workflowpb.CallbackInfo{
 				Trigger: &workflowpb.CallbackInfo_Trigger{
 					Variant: &workflowpb.CallbackInfo_Trigger_WorkflowClosed{},
@@ -4646,16 +4649,16 @@ func (ms *MutableStateImpl) GenerateMigrationTasks() ([]tasks.Task, int64, error
 }
 
 func (ms *MutableStateImpl) processCallbacks() error {
-	for id, cb := range ms.GetExecutionInfo().GetCallbacks() {
+	for _, cb := range ms.GetExecutionInfo().GetCallbacks() {
 		switch cb.PublicInfo.Trigger.GetVariant().(type) {
 		case *workflowpb.CallbackInfo_Trigger_WorkflowClosed:
 			if ms.GetExecutionState().GetState() == enumsspb.WORKFLOW_EXECUTION_STATE_COMPLETED && ms.GetExecutionState().GetStatus() != enumspb.WORKFLOW_EXECUTION_STATUS_CONTINUED_AS_NEW {
 				// TODO: implement BLOCKED
-				sm := callbacks.NewStateMachine(id, cb, ms)
-				if !sm.Can(callbacks.EventScheduled) {
-					continue
-				}
-				if err := sm.Event(context.Background(), callbacks.EventScheduled); err != nil {
+				err := callbacks.TransitionScheduled.Apply(cb, callbacks.EventScheduled{}, ms)
+				if err != nil {
+					if errors.Is(err, statemachines.ErrInvalidTransition) {
+						continue
+					}
 					return err
 				}
 			}

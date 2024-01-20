@@ -68,7 +68,6 @@ require (
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20221227161230-091c0ba34f0a // indirect
-	github.com/looplab/fsm v1.0.1 // indirect
 )
 
 require (

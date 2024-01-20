@@ -1,12 +1,32 @@
+// The MIT License
+//
+// Copyright (c) 2024 Temporal Technologies Inc.  All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
 package callbacks
 
 import (
-	"context"
 	"fmt"
 	"net/url"
 	"time"
 
-	"github.com/looplab/fsm"
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	failurepb "go.temporal.io/api/failure/v1"
@@ -17,172 +37,144 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-const (
-	// EventMarkedReady is triggered when a callback is triggered but is not yet ready to be scheduled, e.g. it is
-	// waiting for another callback to complete.
-	EventMarkedReady = "MarkedReady"
-	// EventBlocked is triggered when a triggered callback cannot be scheduled due to a large backlog for the
-	// callback's namespace and destination.
-	EventBlocked = "Blocked"
-	// EventScheduled is triggered when the callback is meant to be scheduled, either immediately after triggering
-	// or after backing off from a previous attempt.
-	EventScheduled = "Scheduled"
-	// EventAttemptFailed is triggered when an attempt is failed with a retryable error.
-	EventAttemptFailed = "AttemptFailed"
-	// EventAttemptFailed is triggered when an attempt is failed with a non retryable error.
-	EventFailed = "Failed"
-	// EventAttemptFailed is triggered when an attempt succeeds.
-	EventSucceeded = "Succeeded"
-)
+type adapter struct{}
 
-var transitions = fsm.Events{
-	{
-		Name: EventMarkedReady,
-		Src:  []string{enumspb.CALLBACK_STATE_STANDBY.String()},
-		Dst:  enumspb.CALLBACK_STATE_READY.String(),
-	},
-	{
-		Name: EventBlocked,
-		Src: []string{
-			enumspb.CALLBACK_STATE_STANDBY.String(),
-			enumspb.CALLBACK_STATE_READY.String(),
-			enumspb.CALLBACK_STATE_BACKING_OFF.String(),
-		},
-		Dst: enumspb.CALLBACK_STATE_BLOCKED.String(),
-	},
-	{
-		Name: EventScheduled,
-		Src: []string{
-			enumspb.CALLBACK_STATE_BLOCKED.String(),
-			enumspb.CALLBACK_STATE_STANDBY.String(),
-			enumspb.CALLBACK_STATE_READY.String(),
-			enumspb.CALLBACK_STATE_BACKING_OFF.String(),
-		},
-		Dst: enumspb.CALLBACK_STATE_SCHEDULED.String(),
-	},
-	{
-		Name: EventSucceeded,
-		Src:  []string{enumspb.CALLBACK_STATE_SCHEDULED.String()},
-		Dst:  enumspb.CALLBACK_STATE_SUCCEEDED.String(),
-	},
-	{
-		Name: EventFailed,
-		Src:  []string{enumspb.CALLBACK_STATE_SCHEDULED.String()},
-		Dst:  enumspb.CALLBACK_STATE_FAILED.String(),
-	},
-	{
-		Name: EventAttemptFailed,
-		Src:  []string{enumspb.CALLBACK_STATE_SCHEDULED.String()},
-		Dst:  enumspb.CALLBACK_STATE_BACKING_OFF.String(),
-	},
+func (adapter) GetState(data *persistencespb.CallbackInfo) enumspb.CallbackState {
+	return data.PublicInfo.State
 }
 
-// StateMachine contains callback state and an FSM for executing state transitions.
-type StateMachine struct {
-	// Embedded finite state machine.
-	*fsm.FSM
-	// Environment for executing statemachine transitions.
-	env statemachines.Environment
-	// The underlying "state" of this machine.
-	data *persistencespb.CallbackInfo
-	// ID in the mutables state's WorkflowExecutionInfo Callbacks array.
-	id string
+func (adapter) SetState(data *persistencespb.CallbackInfo, state enumspb.CallbackState) {
+	data.PublicInfo.State = state
 }
 
-// NewStateMachine creates a new state machine instance.
-func NewStateMachine(id string, data *persistencespb.CallbackInfo, env statemachines.Environment) StateMachine {
-	sm := StateMachine{id: id, env: env, data: data}
-	sm.FSM = fsm.NewFSM(
-		data.PublicInfo.State.String(),
-		transitions,
-		fsm.Callbacks{
-			"enter_state": func(ctx context.Context, e *fsm.Event) {
-				// TODO: find a way to generalize this function for other state machines.
-				sm.data.Version = env.GetVersion()
-				state, err := enumspb.CallbackStateFromString(e.Dst)
-				if err != nil {
-					// Intentional, force states to be defined in protos.
-					panic(err)
-				}
-				sm.data.PublicInfo.State = state
-			},
-			"leave_" + enumspb.CALLBACK_STATE_SCHEDULED.String(): sm.leaveScheduled,
-			"after_" + EventScheduled:                            sm.afterScheduled,
-			"after_" + EventAttemptFailed:                        sm.afterAttemptFailed,
-			"after_" + EventFailed:                               sm.afterFailed,
-		},
-	)
-	return sm
+func (adapter) OnTransition(data *persistencespb.CallbackInfo, from, to enumspb.CallbackState, env statemachines.Environment) {
+	// TODO: consider moving this into the "framework".
+	data.Version = env.GetVersion()
+	if from == enumspb.CALLBACK_STATE_SCHEDULED {
+		// Reset all of previous attempt's information.
+		data.PublicInfo.Attempt++
+		data.PublicInfo.LastAttemptCompleteTime = timestamppb.New(env.GetCurrentTime())
+		data.PublicInfo.LastAttemptFailure = nil
+	}
+
 }
 
-// leaveScheduled resets all of previous attempt's information.
-func (m *StateMachine) leaveScheduled(ctx context.Context, e *fsm.Event) {
-	m.data.PublicInfo.Attempt++
-	m.data.PublicInfo.LastAttemptCompleteTime = timestamppb.New(m.env.GetCurrentTime())
-	m.data.PublicInfo.LastAttemptFailure = nil
+// EventMarkedReady is triggered when a callback is triggered but is not yet ready to be scheduled, e.g. it is
+// waiting for another callback to complete.
+type EventMarkedReady struct{}
+
+var TransitionMarkedReady = statemachines.Transition[*persistencespb.CallbackInfo, enumspb.CallbackState, EventMarkedReady]{
+	Adapter: adapter{},
+	Src:     []enumspb.CallbackState{enumspb.CALLBACK_STATE_STANDBY},
+	Dst:     enumspb.CALLBACK_STATE_READY,
 }
 
-// afterScheduled schedules a callback task after a "Scheduled" event.
-func (m *StateMachine) afterScheduled(ctx context.Context, e *fsm.Event) {
-	m.data.PublicInfo.NextAttemptScheduleTime = nil
+// EventBlocked is triggered when a triggered callback cannot be scheduled due to a large backlog for the
+// callback's namespace and destination.
+type EventBlocked struct{}
 
-	var destination string
-	switch v := m.data.PublicInfo.Callback.GetVariant().(type) {
-	case *commonpb.Callback_Nexus_:
-		u, err := url.Parse(m.data.PublicInfo.Callback.GetNexus().Url)
-		if err != nil {
-			panic(fmt.Errorf("failed to parse URL: %v", &m.data.PublicInfo))
+var TransitionBlocked = statemachines.Transition[*persistencespb.CallbackInfo, enumspb.CallbackState, EventBlocked]{
+	Adapter: adapter{},
+	Src: []enumspb.CallbackState{
+		enumspb.CALLBACK_STATE_STANDBY,
+		enumspb.CALLBACK_STATE_READY,
+		enumspb.CALLBACK_STATE_BACKING_OFF,
+	},
+	Dst: enumspb.CALLBACK_STATE_BLOCKED,
+}
+
+// EventScheduled is triggered when the callback is meant to be scheduled, either immediately after triggering
+// or after backing off from a previous attempt.
+type EventScheduled struct{}
+
+var TransitionScheduled = statemachines.Transition[*persistencespb.CallbackInfo, enumspb.CallbackState, EventScheduled]{
+	Adapter: adapter{},
+	Src: []enumspb.CallbackState{
+		enumspb.CALLBACK_STATE_BLOCKED,
+		enumspb.CALLBACK_STATE_STANDBY,
+		enumspb.CALLBACK_STATE_READY,
+		enumspb.CALLBACK_STATE_BACKING_OFF,
+	},
+	Dst: enumspb.CALLBACK_STATE_SCHEDULED,
+	After: func(data *persistencespb.CallbackInfo, _ EventScheduled, env statemachines.Environment) error {
+		data.PublicInfo.NextAttemptScheduleTime = nil
+
+		var destination string
+		switch v := data.PublicInfo.Callback.GetVariant().(type) {
+		case *commonpb.Callback_Nexus_:
+			u, err := url.Parse(data.PublicInfo.Callback.GetNexus().Url)
+			if err != nil {
+				return fmt.Errorf("failed to parse URL: %v", &data.PublicInfo)
+			}
+			destination = u.Host
+		default:
+			return fmt.Errorf("unsupported callback variant %v", v)
 		}
-		destination = u.Host
-	default:
-		panic(fmt.Errorf("unsupported callback variant %v", v))
-	}
 
-	m.env.Schedule(&tasks.CallbackTask{
-		CallbackID:         m.id,
-		Attempt:            m.data.PublicInfo.Attempt,
-		DestinationAddress: destination,
-	})
+		env.Schedule(&tasks.CallbackTask{
+			CallbackID:         data.Id,
+			Attempt:            data.PublicInfo.Attempt,
+			DestinationAddress: destination,
+		})
+		return nil
+	},
 }
 
-// afterAttemptFailed updates the last attempt failure and schedules a backoff task after a failed attempt.
-func (m *StateMachine) afterAttemptFailed(ctx context.Context, e *fsm.Event) {
-	err, ok := e.Args[0].(error)
-	if !ok {
-		panic(fmt.Errorf("invalid event argument, expected error, got: %v", e.Args[0]))
-	}
-	// Use 0 for elapsed time as we don't limit the retry by time (for now).
-	// TODO: Make the retry policy intial interval configurable.
-	nextDelay := backoff.NewExponentialRetryPolicy(time.Second).ComputeNextDelay(0, int(m.data.PublicInfo.Attempt))
-	nextAttemptScheduleTime := m.env.GetCurrentTime().Add(nextDelay)
-	m.data.PublicInfo.NextAttemptScheduleTime = timestamppb.New(nextAttemptScheduleTime)
-	m.data.PublicInfo.LastAttemptFailure = &failurepb.Failure{
-		Message: err.Error(),
-		FailureInfo: &failurepb.Failure_ApplicationFailureInfo{
-			ApplicationFailureInfo: &failurepb.ApplicationFailureInfo{
-				NonRetryable: false,
+// EventAttemptFailed is triggered when an attempt is failed with a retryable error.
+type EventAttemptFailed error
+
+var TransitionAttemptFailed = statemachines.Transition[*persistencespb.CallbackInfo, enumspb.CallbackState, EventAttemptFailed]{
+	Adapter: adapter{},
+	Src:     []enumspb.CallbackState{enumspb.CALLBACK_STATE_SCHEDULED},
+	Dst:     enumspb.CALLBACK_STATE_BACKING_OFF,
+	After: func(data *persistencespb.CallbackInfo, err EventAttemptFailed, env statemachines.Environment) error {
+		// Use 0 for elapsed time as we don't limit the retry by time (for now).
+		// TODO: Make the retry policy intial interval configurable.
+		nextDelay := backoff.NewExponentialRetryPolicy(time.Second).ComputeNextDelay(0, int(data.PublicInfo.Attempt))
+		nextAttemptScheduleTime := env.GetCurrentTime().Add(nextDelay)
+		data.PublicInfo.NextAttemptScheduleTime = timestamppb.New(nextAttemptScheduleTime)
+		data.PublicInfo.LastAttemptFailure = &failurepb.Failure{
+			Message: err.Error(),
+			FailureInfo: &failurepb.Failure_ApplicationFailureInfo{
+				ApplicationFailureInfo: &failurepb.ApplicationFailureInfo{
+					NonRetryable: false,
+				},
 			},
-		},
-	}
-	m.env.Schedule(&tasks.CallbackBackoffTask{
-		CallbackID:          m.id,
-		Attempt:             m.data.PublicInfo.Attempt,
-		VisibilityTimestamp: nextAttemptScheduleTime,
-	})
+		}
+		env.Schedule(&tasks.CallbackBackoffTask{
+			CallbackID:          data.Id,
+			Attempt:             data.PublicInfo.Attempt,
+			VisibilityTimestamp: nextAttemptScheduleTime,
+		})
+		return nil
+	},
 }
 
-// afterFailed updates the last attempt failure after a non-retryable failure.
-func (m *StateMachine) afterFailed(ctx context.Context, e *fsm.Event) {
-	err, ok := e.Args[0].(error)
-	if !ok {
-		panic(fmt.Errorf("invalid event argument, expected error, got: %v", e.Args[0]))
-	}
-	m.data.PublicInfo.LastAttemptFailure = &failurepb.Failure{
-		Message: err.Error(),
-		FailureInfo: &failurepb.Failure_ApplicationFailureInfo{
-			ApplicationFailureInfo: &failurepb.ApplicationFailureInfo{
-				NonRetryable: true,
+// EventFailed is triggered when an attempt is failed with a non retryable error.
+type EventFailed error
+
+var TransitionFailed = statemachines.Transition[*persistencespb.CallbackInfo, enumspb.CallbackState, EventFailed]{
+	Adapter: adapter{},
+	Src:     []enumspb.CallbackState{enumspb.CALLBACK_STATE_SCHEDULED},
+	Dst:     enumspb.CALLBACK_STATE_FAILED,
+	After: func(data *persistencespb.CallbackInfo, err EventFailed, env statemachines.Environment) error {
+		data.PublicInfo.LastAttemptFailure = &failurepb.Failure{
+			Message: err.Error(),
+			FailureInfo: &failurepb.Failure_ApplicationFailureInfo{
+				ApplicationFailureInfo: &failurepb.ApplicationFailureInfo{
+					NonRetryable: true,
+				},
 			},
-		},
-	}
+		}
+		return nil
+	},
+}
+
+// EventSucceeded is triggered when an attempt succeeds.
+type EventSucceeded struct{}
+
+var TransitionSucceeded = statemachines.Transition[*persistencespb.CallbackInfo, enumspb.CallbackState, EventSucceeded]{
+	Adapter: adapter{},
+	Src:     []enumspb.CallbackState{enumspb.CALLBACK_STATE_SCHEDULED},
+	Dst:     enumspb.CALLBACK_STATE_SUCCEEDED,
 }

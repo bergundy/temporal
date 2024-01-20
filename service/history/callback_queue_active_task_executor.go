@@ -24,6 +24,7 @@ package history
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -39,6 +40,7 @@ import (
 	"go.temporal.io/server/service/history/consts"
 	"go.temporal.io/server/service/history/queues"
 	"go.temporal.io/server/service/history/shard"
+	"go.temporal.io/server/service/history/statemachines"
 	"go.temporal.io/server/service/history/tasks"
 	"go.temporal.io/server/service/history/workflow"
 	wcache "go.temporal.io/server/service/history/workflow/cache"
@@ -201,29 +203,25 @@ func (t *callbackQueueActiveTaskExecutor) processNexusCallbackTask(ctx context.C
 		return err
 	}
 	response, err := http.DefaultClient.Do(request)
-	return t.updateCallbackState(ctx, task, func(sm callbacks.StateMachine) error {
-		// Callback was already modified while the task was executing, drop this attempt.
-		if !sm.Is(enumspb.CALLBACK_STATE_SCHEDULED.String()) {
-			return nil
-		}
+	return t.updateCallbackState(ctx, task, func(env statemachines.Environment, callback *persistence.CallbackInfo) error {
 		if err != nil {
-			return sm.Event(ctx, callbacks.EventAttemptFailed, err)
+			return callbacks.TransitionAttemptFailed.Apply(callback, callbacks.EventAttemptFailed(err), env)
 		}
 		if response.StatusCode >= 200 && response.StatusCode < 300 {
-			return sm.Event(ctx, callbacks.EventSucceeded)
+			return callbacks.TransitionSucceeded.Apply(callback, callbacks.EventSucceeded{}, env)
 		}
 		// TODO: get exact non retryable vs. retryable error codes
 		if response.StatusCode >= 400 && response.StatusCode < 500 {
-			return sm.Event(ctx, callbacks.EventFailed, err)
+			return callbacks.TransitionFailed.Apply(callback, callbacks.EventFailed(err), env)
 		}
-		return sm.Event(ctx, callbacks.EventAttemptFailed, fmt.Errorf("request failed with: %v", response.Status))
+		return callbacks.TransitionAttemptFailed.Apply(callback, callbacks.EventAttemptFailed(fmt.Errorf("request failed with: %v", response.Status)), env)
 	})
 }
 
 func (t *callbackQueueActiveTaskExecutor) updateCallbackState(
 	ctx context.Context,
 	task *tasks.CallbackTask,
-	updateCallbackFn func(callbacks.StateMachine) error,
+	updateCallbackFn func(statemachines.Environment, *persistence.CallbackInfo) error,
 ) (retErr error) {
 	weContext, release, err := getWorkflowExecutionContextForTask(ctx, t.shard, t.workflowCache, task)
 	if err != nil {
@@ -236,9 +234,13 @@ func (t *callbackQueueActiveTaskExecutor) updateCallbackState(
 		if !ok {
 			panic("TODO")
 		}
-		sm := callbacks.NewStateMachine(task.CallbackID, callback, ms)
+		err := updateCallbackFn(ms, callback)
+		if errors.Is(err, statemachines.ErrInvalidTransition) {
+			// Callback was already modified while the task was executing, drop this attempt.
+			return nil
+		}
 		// TODO: replication task
-		return updateCallbackFn(sm)
+		return err
 	})
 }
 

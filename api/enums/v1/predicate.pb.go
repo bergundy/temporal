@@ -55,9 +55,7 @@ const (
 	PREDICATE_TYPE_NOT          PredicateType = 5
 	PREDICATE_TYPE_NAMESPACE_ID PredicateType = 6
 	PREDICATE_TYPE_TASK_TYPE    PredicateType = 7
-	// TODO: this?
-	// PREDICATE_TYPE_NAMESPACE_ID_AND_DESTINATION = 8;
-	PREDICATE_TYPE_DESTINATION PredicateType = 8
+	PREDICATE_TYPE_DESTINATION  PredicateType = 8
 )
 
 // Enum value maps for PredicateType.

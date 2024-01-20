@@ -175,13 +175,12 @@ func (t *timerQueueActiveTaskExecutor) executeCallbackBackoffTask(
 		// TODO: think about the error returned here
 		return fmt.Errorf("invalid callback ID for task")
 	}
-	sm := callbacks.NewStateMachine(task.CallbackID, callback, mutableState)
 	// TODO: compare Version and Attempt
 	// TODO: check callback is not blocked (not implemented yet)
-	if !sm.Can(callbacks.EventScheduled) {
+	if !callbacks.TransitionScheduled.Possible(callback) {
 		// TODO: error for stale task
 	}
-	if err := sm.Event(ctx, callbacks.EventScheduled); err != nil {
+	if err := callbacks.TransitionScheduled.Apply(callback, callbacks.EventScheduled{}, mutableState); err != nil {
 		return err
 	}
 	return weContext.UpdateWorkflowExecutionAsActive(ctx, t.shardContext)

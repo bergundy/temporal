@@ -1,7 +1,6 @@
 package callbacks_test
 
 import (
-	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -17,16 +16,6 @@ import (
 	"go.temporal.io/server/service/history/tasks"
 )
 
-func TestNewSetsState(t *testing.T) {
-	env := &statemachines.MockEnvironment{}
-	sm := callbacks.NewStateMachine("ID", &persistencespb.CallbackInfo{
-		PublicInfo: &workflowpb.CallbackInfo{
-			State: enumspb.CALLBACK_STATE_READY,
-		},
-	}, env)
-	require.Equal(t, enumspb.CALLBACK_STATE_READY.String(), sm.Current())
-}
-
 func TestMarkedReady(t *testing.T) {
 	env := &statemachines.MockEnvironment{
 		Version: 3,
@@ -36,10 +25,8 @@ func TestMarkedReady(t *testing.T) {
 			State: enumspb.CALLBACK_STATE_STANDBY,
 		},
 	}
-	sm := callbacks.NewStateMachine("ID", info, env)
-	err := sm.Event(context.Background(), callbacks.EventMarkedReady)
+	err := callbacks.TransitionMarkedReady.Apply(info, callbacks.EventMarkedReady{}, env)
 	require.NoError(t, err)
-	require.Equal(t, enumspb.CALLBACK_STATE_READY.String(), sm.Current())
 	// Use this test to verify version and state are synced.
 	require.Equal(t, int64(3), info.Version)
 	require.Equal(t, enumspb.CALLBACK_STATE_READY, info.PublicInfo.State)
@@ -51,6 +38,7 @@ func TestValidTransitions(t *testing.T) {
 		CurrentTime: time.Now().UTC(),
 	}
 	info := &persistencespb.CallbackInfo{
+		Id: "ID",
 		PublicInfo: &workflowpb.CallbackInfo{
 			Callback: &commonpb.Callback{
 				Variant: &commonpb.Callback_Nexus_{
@@ -62,10 +50,8 @@ func TestValidTransitions(t *testing.T) {
 			State: enumspb.CALLBACK_STATE_SCHEDULED,
 		},
 	}
-	sm := callbacks.NewStateMachine("ID", info, env)
-
 	// AttemptFailed
-	err := sm.Event(context.Background(), callbacks.EventAttemptFailed, fmt.Errorf("test"))
+	err := callbacks.TransitionAttemptFailed.Apply(info, callbacks.EventAttemptFailed(fmt.Errorf("test")), env)
 	require.NoError(t, err)
 
 	// Assert info object is updated
@@ -85,7 +71,7 @@ func TestValidTransitions(t *testing.T) {
 	require.Equal(t, info.PublicInfo.NextAttemptScheduleTime.AsTime(), boTask.VisibilityTimestamp)
 
 	// Scheduled
-	err = sm.Event(context.Background(), callbacks.EventScheduled)
+	err = callbacks.TransitionScheduled.Apply(info, callbacks.EventScheduled{}, env)
 	require.NoError(t, err)
 
 	// Assert info object is updated only where needed
@@ -107,7 +93,7 @@ func TestValidTransitions(t *testing.T) {
 
 	// Succeeded
 	env.CurrentTime = env.CurrentTime.Add(time.Second)
-	err = sm.Event(context.Background(), callbacks.EventSucceeded)
+	err = callbacks.TransitionSucceeded.Apply(info, callbacks.EventSucceeded{}, env)
 	require.NoError(t, err)
 
 	// Assert info object is updated only where needed
@@ -123,10 +109,9 @@ func TestValidTransitions(t *testing.T) {
 	// Reset back to scheduled
 	info = infoDup
 	info.PublicInfo.State = enumspb.CALLBACK_STATE_SCHEDULED
-	sm = callbacks.NewStateMachine("ID", info, env)
 
 	// Failed
-	err = sm.Event(context.Background(), callbacks.EventFailed, fmt.Errorf("failed"))
+	err = callbacks.TransitionFailed.Apply(info, callbacks.EventFailed(fmt.Errorf("failed")), env)
 	require.NoError(t, err)
 
 	// Assert info object is updated only where needed
