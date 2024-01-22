@@ -51,6 +51,7 @@ type (
 		SetVisibilityTime(timestamp time.Time)
 	}
 
+	// HasDestination must be implemented by all tasks used in multi-destination queues.
 	HasDestination interface {
 		GetDestination() string
 	}

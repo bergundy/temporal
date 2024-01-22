@@ -203,7 +203,10 @@ func NewWorkflowHandler(
 			config.SearchAttributesSizeOfValueLimit,
 			config.SearchAttributesTotalSizeLimit,
 			visibilityMrg,
-			visibility.AllowListForValidation(visibilityMrg.GetStoreNames()),
+			visibility.AllowListForValidation(
+				visibilityMrg.GetStoreNames(),
+				config.VisibilityAllowList,
+			),
 		),
 		archivalMetadata:    archivalMetadata,
 		healthServer:        healthServer,

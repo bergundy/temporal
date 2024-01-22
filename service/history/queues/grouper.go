@@ -27,24 +27,42 @@ import (
 	"go.temporal.io/server/service/history/tasks"
 )
 
+<<<<<<< HEAD
 // TODO: document me
 type Grouper interface {
 	Key(task tasks.Task) (key any)
+=======
+// Grouper groups tasks and constructs predicates for those groups.
+type Grouper interface {
+	// Key returns the group key for a given task.
+	Key(task tasks.Task) (key any)
+	// Predicate constructs a prdicate from a slice of keys.
+>>>>>>> origin/main
 	Predicate(keys []any) tasks.Predicate
 }
 
 type GrouperNamespaceID struct {
 }
 
+<<<<<<< HEAD
 // Key implements Indexer.
+=======
+>>>>>>> origin/main
 func (GrouperNamespaceID) Key(task tasks.Task) (key any) {
 	return task.GetNamespaceID()
 }
 
+<<<<<<< HEAD
 // Predicate implements Indexer.
 func (GrouperNamespaceID) Predicate(keys []any) tasks.Predicate {
 	pendingNamespaceIDs := make([]string, len(keys))
 	for i, namespaceID := range keys {
+=======
+func (GrouperNamespaceID) Predicate(keys []any) tasks.Predicate {
+	pendingNamespaceIDs := make([]string, len(keys))
+	for i, namespaceID := range keys {
+		// Assume predicate is only called with keys returned from GrouperNamespaceID.Key()
+>>>>>>> origin/main
 		pendingNamespaceIDs[i] = namespaceID.(string)
 	}
 	return tasks.NewNamespacePredicate(pendingNamespaceIDs)
@@ -61,6 +79,7 @@ type namespaceIDAndDestination struct {
 type GrouperNamespaceIDAndDestination struct {
 }
 
+<<<<<<< HEAD
 // Key implements Grouper.
 func (GrouperNamespaceIDAndDestination) Key(task tasks.Task) (key any) {
 	// Only CallbackTasks are supported for now.
@@ -74,6 +93,22 @@ func (GrouperNamespaceIDAndDestination) Predicate(keys []any) tasks.Predicate {
 	for _, namespaceID := range keys {
 		key := namespaceID.(namespaceIDAndDestination)
 		// We probably should just combine the two predicate implementations for better shrinking logic.
+=======
+func (GrouperNamespaceIDAndDestination) Key(task tasks.Task) (key any) {
+	getter, ok := task.(tasks.HasDestination)
+	var dest string
+	if ok {
+		dest = getter.GetDestination()
+	}
+	return namespaceIDAndDestination{task.GetNamespaceID(), dest}
+}
+
+func (GrouperNamespaceIDAndDestination) Predicate(keys []any) tasks.Predicate {
+	pred := predicates.Empty[tasks.Task]()
+	for _, namespaceID := range keys {
+		// Assume predicate is only called with keys returned from GrouperNamespaceID.Key()
+		key := namespaceID.(namespaceIDAndDestination)
+>>>>>>> origin/main
 		pred = predicates.Or(pred, predicates.And(
 			tasks.NewNamespacePredicate([]string{key.namespaceID}),
 			tasks.NewDestinationPredicate([]string{key.destination}),

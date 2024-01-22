@@ -324,7 +324,7 @@ func ToPersistenceDestinationPredicate(
 	taskDestinationPredicate *tasks.DestinationPredicate,
 ) *persistencespb.Predicate {
 	return &persistencespb.Predicate{
-		PredicateType: enumsspb.PREDICATE_TYPE_TASK_TYPE,
+		PredicateType: enumsspb.PREDICATE_TYPE_DESTINATION,
 		Attributes: &persistencespb.Predicate_DestinationPredicateAttributes{
 			DestinationPredicateAttributes: &persistencespb.DestinationPredicateAttributes{
 				Destinations: maps.Keys(taskDestinationPredicate.Destinations),

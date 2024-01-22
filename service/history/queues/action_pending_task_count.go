@@ -44,14 +44,14 @@ type (
 		attributes     *AlertAttributesQueuePendingTaskCount
 		monitor        Monitor
 		maxReaderCount int64
+		grouper        Grouper
 
-		// state of the action, used when running the action
-		tasksPerKey map[any]int
-		// the key for the inner map is typed any due to the tracker mechanism types
+		// Fields below this line make up the state of the action. Used when running the action.
+		// Key type is "any" to support grouping tasks by arbitrary keys.
+		tasksPerKey                map[any]int
 		pendingTasksPerKeyPerSlice map[Slice]map[any]int
 		slicesPerKey               map[any][]Slice
 		keysToClearPerSlice        map[Slice][]any
-		grouper                    Grouper
 	}
 )
 

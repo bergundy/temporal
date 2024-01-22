@@ -246,6 +246,7 @@ func (mr *MockHasDestinationMockRecorder) GetDestination() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetDestination", reflect.TypeOf((*MockHasDestination)(nil).GetDestination))
 }
+<<<<<<< HEAD
 
 // MockPartialTask is a mock of PartialTask interface.
 type MockPartialTask struct {
@@ -443,3 +444,5 @@ func (mr *MockPartialTaskMockRecorder) SetWorkflowKey(arg0 interface{}) *gomock.
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SetWorkflowKey", reflect.TypeOf((*MockPartialTask)(nil).SetWorkflowKey), arg0)
 }
+=======
+>>>>>>> origin/main

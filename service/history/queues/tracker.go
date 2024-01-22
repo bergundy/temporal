@@ -36,15 +36,26 @@ type (
 	// currently it's used as a implementation detail in SliceImpl
 	executableTracker struct {
 		pendingExecutables map[tasks.Key]Executable
+<<<<<<< HEAD
 		indexer            Grouper
+=======
+		grouper            Grouper
+>>>>>>> origin/main
 		pendingPerKey      map[any]int
 	}
 )
 
+<<<<<<< HEAD
 func newExecutableTracker(indexer Grouper) *executableTracker {
 	return &executableTracker{
 		pendingExecutables: make(map[tasks.Key]Executable),
 		indexer:            indexer,
+=======
+func newExecutableTracker(grouper Grouper) *executableTracker {
+	return &executableTracker{
+		pendingExecutables: make(map[tasks.Key]Executable),
+		grouper:            grouper,
+>>>>>>> origin/main
 		pendingPerKey:      make(map[any]int, 0),
 	}
 }
@@ -55,7 +66,11 @@ func (t *executableTracker) split(
 ) (*executableTracker, *executableTracker) {
 	that := executableTracker{
 		pendingExecutables: make(map[tasks.Key]Executable, len(t.pendingExecutables)/2),
+<<<<<<< HEAD
 		indexer:            t.indexer,
+=======
+		grouper:            t.grouper,
+>>>>>>> origin/main
 		pendingPerKey:      make(map[any]int, len(t.pendingPerKey)),
 	}
 
@@ -72,7 +87,11 @@ func (t *executableTracker) split(
 		delete(t.pendingExecutables, key)
 		that.pendingExecutables[key] = executable
 
+<<<<<<< HEAD
 		groupKey := t.indexer.Key(executable)
+=======
+		groupKey := t.grouper.Key(executable)
+>>>>>>> origin/main
 		t.pendingPerKey[groupKey]--
 		that.pendingPerKey[groupKey]++
 	}
@@ -90,7 +109,11 @@ func (t *executableTracker) merge(incomingTracker *executableTracker) *executabl
 
 	for key, executable := range thatExecutables {
 		thisExecutables[key] = executable
+<<<<<<< HEAD
 		key := t.indexer.Key(executable)
+=======
+		key := t.grouper.Key(executable)
+>>>>>>> origin/main
 		thisPendingTasks[key]++
 	}
 	t.pendingExecutables = thisExecutables
@@ -102,7 +125,11 @@ func (t *executableTracker) add(
 	executable Executable,
 ) {
 	t.pendingExecutables[executable.GetKey()] = executable
+<<<<<<< HEAD
 	key := t.indexer.Key(executable)
+=======
+	key := t.grouper.Key(executable)
+>>>>>>> origin/main
 	t.pendingPerKey[key]++
 }
 
@@ -110,7 +137,11 @@ func (t *executableTracker) shrink() tasks.Key {
 	minPendingTaskKey := tasks.MaximumKey
 	for key, executable := range t.pendingExecutables {
 		if executable.State() == ctasks.TaskStateAcked {
+<<<<<<< HEAD
 			t.pendingPerKey[t.indexer.Key(executable)]--
+=======
+			t.pendingPerKey[t.grouper.Key(executable)]--
+>>>>>>> origin/main
 			delete(t.pendingExecutables, key)
 			continue
 		}
