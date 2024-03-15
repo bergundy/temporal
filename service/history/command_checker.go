@@ -943,7 +943,9 @@ func (v *commandAttrValidator) validateCommandSequence(
 			enumspb.COMMAND_TYPE_START_CHILD_WORKFLOW_EXECUTION,
 			enumspb.COMMAND_TYPE_UPSERT_WORKFLOW_SEARCH_ATTRIBUTES,
 			enumspb.COMMAND_TYPE_MODIFY_WORKFLOW_PROPERTIES,
-			enumspb.COMMAND_TYPE_PROTOCOL_MESSAGE:
+			enumspb.COMMAND_TYPE_PROTOCOL_MESSAGE,
+			enumspb.COMMAND_TYPE_SCHEDULE_NEXUS_OPERATION,
+			enumspb.COMMAND_TYPE_REQUEST_CANCEL_NEXUS_OPERATION:
 			// noop
 		case enumspb.COMMAND_TYPE_CONTINUE_AS_NEW_WORKFLOW_EXECUTION,
 			enumspb.COMMAND_TYPE_COMPLETE_WORKFLOW_EXECUTION,
@@ -951,6 +953,7 @@ func (v *commandAttrValidator) validateCommandSequence(
 			enumspb.COMMAND_TYPE_CANCEL_WORKFLOW_EXECUTION:
 			closeCommand = command.GetCommandType()
 		default:
+			// Why is this the default? Can't we assume that any specified command is by default not a close command?
 			return serviceerror.NewInvalidArgument(fmt.Sprintf("unknown command type: %v", command.GetCommandType()))
 		}
 	}

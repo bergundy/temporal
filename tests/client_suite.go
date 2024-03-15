@@ -101,6 +101,7 @@ func (s *ClientFunctionalSuite) SetupSuite() {
 		dynamicconfig.FrontendEnableNexusHTTPHandler:             true,
 		dynamicconfig.FrontendEnableWorkerVersioningDataAPIs:     true,
 		dynamicconfig.FrontendEnableWorkerVersioningWorkflowAPIs: true,
+		dynamicconfig.OutboundProcessorEnabled:                   true,
 	}
 	s.setupSuite("testdata/client_cluster.yaml")
 }
