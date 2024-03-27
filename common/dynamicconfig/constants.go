@@ -375,8 +375,8 @@ const (
 	KeepAliveTimeout = "frontend.keepAliveTimeout"
 	// FrontendEnableSchedules enables schedule-related RPCs in the frontend
 	FrontendEnableSchedules = "frontend.enableSchedules"
-	// FrontendEnableNexusHTTPHandler enables serving Nexus HTTP requests in the frontend.
-	FrontendEnableNexusHTTPHandler = "frontend.enableNexusHTTPHandler"
+	// FrontendEnableNexusAPIs enables serving Nexus HTTP requests in the frontend.
+	FrontendEnableNexusAPIs = "frontend.enableNexusAPIs"
 	// FrontendEnableCallbackAttachment enables attaching callbacks to workflows.
 	FrontendEnableCallbackAttachment = "frontend.enableCallbackAttachment"
 	// FrontendMaxConcurrentBatchOperationPerNamespace is the max concurrent batch operation job count per namespace
