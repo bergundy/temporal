@@ -1832,6 +1832,21 @@ func (mr *MockMutableStateMockRecorder) GetCurrentVersion() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCurrentVersion", reflect.TypeOf((*MockMutableState)(nil).GetCurrentVersion))
 }
 
+// GenerateEventLoadToken mocks base method.
+func (m *MockMutableState) GenerateEventLoadToken(event *v13.HistoryEvent) ([]byte, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetEventLoadToken", event)
+	ret0, _ := ret[0].([]byte)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetEventLoadToken indicates an expected call of GetEventLoadToken.
+func (mr *MockMutableStateMockRecorder) GetEventLoadToken(event interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetEventLoadToken", reflect.TypeOf((*MockMutableState)(nil).GenerateEventLoadToken), event)
+}
+
 // GetExecutionInfo mocks base method.
 func (m *MockMutableState) GetExecutionInfo() *v112.WorkflowExecutionInfo {
 	m.ctrl.T.Helper()
