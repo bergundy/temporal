@@ -67,12 +67,10 @@ var (
 
 type (
 	transferQueueTaskExecutorBase struct {
+		stateMachineEnvironment
 		currentClusterName       string
-		shardContext             shard.Context
 		registry                 namespace.Registry
-		cache                    wcache.Cache
-		logger                   log.Logger
-		metricHandler            metrics.Handler
+		metricsHandler           metrics.Handler
 		historyRawClient         resource.HistoryRawClient
 		matchingRawClient        resource.MatchingRawClient
 		config                   *configs.Config
@@ -86,18 +84,20 @@ func newTransferQueueTaskExecutorBase(
 	shardContext shard.Context,
 	workflowCache wcache.Cache,
 	logger log.Logger,
-	metricHandler metrics.Handler,
+	metricsHandler metrics.Handler,
 	historyRawClient resource.HistoryRawClient,
 	matchingRawClient resource.MatchingRawClient,
 	visibilityManager manager.VisibilityManager,
 ) *transferQueueTaskExecutorBase {
 	return &transferQueueTaskExecutorBase{
+		stateMachineEnvironment: stateMachineEnvironment{
+			shardContext:   shardContext,
+			cache:          workflowCache,
+			logger:         logger,
+			metricsHandler: metricsHandler,
+		},
 		currentClusterName:       shardContext.GetClusterMetadata().GetCurrentClusterName(),
-		shardContext:             shardContext,
 		registry:                 shardContext.GetNamespaceRegistry(),
-		cache:                    workflowCache,
-		logger:                   logger,
-		metricHandler:            metricHandler,
 		historyRawClient:         historyRawClient,
 		matchingRawClient:        matchingRawClient,
 		config:                   shardContext.GetConfig(),
@@ -157,7 +157,7 @@ func (t *transferQueueTaskExecutorBase) pushActivity(
 		t.shardContext,
 		transactionPolicy,
 		t.cache,
-		t.metricHandler,
+		t.metricsHandler,
 		t.logger,
 	)
 }
@@ -208,7 +208,7 @@ func (t *transferQueueTaskExecutorBase) pushWorkflowTask(
 		t.shardContext,
 		transactionPolicy,
 		t.cache,
-		t.metricHandler,
+		t.metricsHandler,
 		t.logger,
 	)
 }
@@ -248,7 +248,7 @@ func (t *transferQueueTaskExecutorBase) deleteExecution(
 	}
 	defer func() { release(retError) }()
 
-	mutableState, err := loadMutableStateForTransferTask(ctx, t.shardContext, weCtx, task, t.metricHandler, t.logger)
+	mutableState, err := loadMutableStateForTransferTask(ctx, t.shardContext, weCtx, task, t.metricsHandler, t.logger)
 	if err != nil {
 		return err
 	}

@@ -30,6 +30,7 @@ import (
 	"time"
 
 	enumsspb "go.temporal.io/server/api/enums/v1"
+	persistencespb "go.temporal.io/server/api/persistence/v1"
 	"go.temporal.io/server/common"
 )
 
@@ -60,10 +61,11 @@ type (
 		GetVersion() int64
 	}
 
-	// HasStateMachineTaskType must be implemented by all HSM state machine tasks.
-	HasStateMachineTaskType interface {
-		StateMachineTaskType() string
+	// HasStateMachineTaskInfo must be implemented by all HSM state machine tasks.
+	HasStateMachineTaskInfo interface {
+		StateMachineTaskInfo() *persistencespb.StateMachineTaskInfo
 	}
+
 	// HasDestination must be implemented by all tasks used in the outbound queue.
 	HasDestination interface {
 		GetDestination() string

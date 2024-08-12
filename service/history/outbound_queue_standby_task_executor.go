@@ -119,6 +119,7 @@ func (e *outboundQueueStandbyTaskExecutor) processTask(
 		return err
 	}
 
+	// Use the Access function to Validate() the reference and node.
 	err = e.Access(ctx, ref, hsm.AccessRead, func(node *hsm.Node) error {
 		// If we managed to access the machine the task is still valid.
 		// The logic below will either discard it or retry.

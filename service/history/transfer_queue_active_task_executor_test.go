@@ -2531,10 +2531,13 @@ func (s *transferQueueActiveTaskExecutorSuite) TestPendingCloseExecutionTasks() 
 
 			executor := &transferQueueActiveTaskExecutor{
 				transferQueueTaskExecutorBase: &transferQueueTaskExecutorBase{
-					cache:                 mockWorkflowCache,
+					stateMachineEnvironment: stateMachineEnvironment{
+						shardContext:   mockShard,
+						cache:          mockWorkflowCache,
+						metricsHandler: metrics.NoopMetricsHandler,
+						logger:         log.NewNoopLogger(),
+					},
 					config:                mockShard.GetConfig(),
-					metricHandler:         metrics.NoopMetricsHandler,
-					shardContext:          mockShard,
 					workflowDeleteManager: mockWorkflowDeleteManager,
 				},
 			}

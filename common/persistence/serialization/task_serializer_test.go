@@ -471,8 +471,8 @@ func (s *taskSerializerSuite) TestStateMachineOutboundTask() {
 	blob, err := s.taskSerializer.SerializeTask(task)
 	s.NoError(err)
 	deserializedTaskIface, err := s.taskSerializer.DeserializeTask(task.GetCategory(), blob)
-	deserializedTask := deserializedTaskIface.(*tasks.StateMachineOutboundTask)
 	s.NoError(err)
+	deserializedTask := deserializedTaskIface.(*tasks.StateMachineOutboundTask)
 
 	protorequire.ProtoEqual(s.T(), task.Info, deserializedTask.Info)
 	task.Info = nil
@@ -494,9 +494,58 @@ func (s *taskSerializerSuite) TestStateMachineTimerTask() {
 	blob, err := s.taskSerializer.SerializeTask(task)
 	s.NoError(err)
 	deserializedTaskIface, err := s.taskSerializer.DeserializeTask(task.GetCategory(), blob)
-	deserializedTask := deserializedTaskIface.(*tasks.StateMachineTimerTask)
 	s.NoError(err)
+	deserializedTask := deserializedTaskIface.(*tasks.StateMachineTimerTask)
 
+	s.Equal(task, deserializedTask)
+}
+
+func (s *taskSerializerSuite) TestStateMachineTransferTask() {
+	task := &tasks.StateMachineTransferTask{
+		StateMachineTask: tasks.StateMachineTask{
+			WorkflowKey:         s.workflowKey,
+			VisibilityTimestamp: time.Now().UTC(),
+			TaskID:              rand.Int63(),
+			Info: &persistence.StateMachineTaskInfo{
+				Ref: &persistence.StateMachineRef{
+					Path: []*persistence.StateMachineKey{
+						{
+							Type: "some-type",
+							Id:   "some-id",
+						},
+					},
+					MutableStateVersionedTransition: &persistence.VersionedTransition{
+						NamespaceFailoverVersion: rand.Int63(),
+						TransitionCount:          rand.Int63(),
+					},
+					MachineInitialVersionedTransition: &persistence.VersionedTransition{
+						NamespaceFailoverVersion: rand.Int63(),
+						TransitionCount:          rand.Int63(),
+					},
+					MachineLastUpdateVersionedTransition: &persistence.VersionedTransition{
+						NamespaceFailoverVersion: rand.Int63(),
+						TransitionCount:          rand.Int63(),
+					},
+					MachineTransitionCount: rand.Int63(),
+				},
+				Type: "some-type",
+				Data: []byte{},
+			},
+		},
+	}
+
+	s.Assert().Equal(tasks.CategoryTransfer, task.GetCategory())
+	s.Assert().Equal(enumsspb.TASK_TYPE_STATE_MACHINE_TRANSFER, task.GetType())
+
+	blob, err := s.taskSerializer.SerializeTask(task)
+	s.NoError(err)
+	deserializedTaskIface, err := s.taskSerializer.DeserializeTask(task.GetCategory(), blob)
+	s.NoError(err)
+	deserializedTask := deserializedTaskIface.(*tasks.StateMachineTransferTask)
+
+	protorequire.ProtoEqual(s.T(), task.Info, deserializedTask.Info)
+	task.Info = nil
+	deserializedTask.Info = nil
 	s.Equal(task, deserializedTask)
 }
 

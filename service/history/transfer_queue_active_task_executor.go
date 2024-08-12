@@ -159,6 +159,8 @@ func (t *transferQueueActiveTaskExecutor) Execute(
 		err = t.processResetWorkflow(ctx, task)
 	case *tasks.DeleteExecutionTask:
 		err = t.processDeleteExecutionTask(ctx, task)
+	case *tasks.StateMachineTransferTask:
+		err = t.processStateMachineTask(ctx, task)
 	default:
 		err = errUnknownTransferTask
 	}
@@ -189,7 +191,7 @@ func (t *transferQueueActiveTaskExecutor) processActivityTask(
 	}
 	defer func() { release(retError) }()
 
-	mutableState, err := loadMutableStateForTransferTask(ctx, t.shardContext, weContext, task, t.metricHandler, t.logger)
+	mutableState, err := loadMutableStateForTransferTask(ctx, t.shardContext, weContext, task, t.metricsHandler, t.logger)
 	if err != nil {
 		return err
 	}
@@ -238,7 +240,7 @@ func (t *transferQueueActiveTaskExecutor) processWorkflowTask(
 	}
 	defer func() { release(retError) }()
 
-	mutableState, err := loadMutableStateForTransferTask(ctx, t.shardContext, weContext, transferTask, t.metricHandler, t.logger)
+	mutableState, err := loadMutableStateForTransferTask(ctx, t.shardContext, weContext, transferTask, t.metricsHandler, t.logger)
 	if err != nil {
 		return err
 	}
@@ -318,7 +320,7 @@ func (t *transferQueueActiveTaskExecutor) processCloseExecution(
 	}
 	defer func() { release(retError) }()
 
-	mutableState, err := loadMutableStateForTransferTask(ctx, t.shardContext, weContext, task, t.metricHandler, t.logger)
+	mutableState, err := loadMutableStateForTransferTask(ctx, t.shardContext, weContext, task, t.metricsHandler, t.logger)
 	if err != nil {
 		return err
 	}
@@ -439,7 +441,7 @@ func (t *transferQueueActiveTaskExecutor) processCancelExecution(
 	}
 	defer func() { release(retError) }()
 
-	mutableState, err := loadMutableStateForTransferTask(ctx, t.shardContext, weContext, task, t.metricHandler, t.logger)
+	mutableState, err := loadMutableStateForTransferTask(ctx, t.shardContext, weContext, task, t.metricsHandler, t.logger)
 	if err != nil {
 		return err
 	}
@@ -559,7 +561,7 @@ func (t *transferQueueActiveTaskExecutor) processSignalExecution(
 	}
 	defer func() { release(retError) }()
 
-	mutableState, err := loadMutableStateForTransferTask(ctx, t.shardContext, weContext, task, t.metricHandler, t.logger)
+	mutableState, err := loadMutableStateForTransferTask(ctx, t.shardContext, weContext, task, t.metricsHandler, t.logger)
 	if err != nil {
 		return err
 	}
@@ -712,7 +714,7 @@ func (t *transferQueueActiveTaskExecutor) processStartChildExecution(
 	}
 	defer func() { release(retError) }()
 
-	mutableState, err := loadMutableStateForTransferTask(ctx, t.shardContext, weContext, task, t.metricHandler, t.logger)
+	mutableState, err := loadMutableStateForTransferTask(ctx, t.shardContext, weContext, task, t.metricsHandler, t.logger)
 	if err != nil {
 		return err
 	}
@@ -917,7 +919,7 @@ func (t *transferQueueActiveTaskExecutor) processResetWorkflow(
 	}
 	defer func() { currentRelease(retError) }()
 
-	currentMutableState, err := loadMutableStateForTransferTask(ctx, t.shardContext, currentContext, task, t.metricHandler, t.logger)
+	currentMutableState, err := loadMutableStateForTransferTask(ctx, t.shardContext, currentContext, task, t.metricsHandler, t.logger)
 	if err != nil {
 		return err
 	}
@@ -1005,7 +1007,7 @@ func (t *transferQueueActiveTaskExecutor) processResetWorkflow(
 			return err
 		}
 		defer func() { baseRelease(retError) }()
-		baseMutableState, err = loadMutableStateForTransferTask(ctx, t.shardContext, baseContext, task, t.metricHandler, t.logger)
+		baseMutableState, err = loadMutableStateForTransferTask(ctx, t.shardContext, baseContext, task, t.metricsHandler, t.logger)
 		if err != nil {
 			return err
 		}
@@ -1026,6 +1028,23 @@ func (t *transferQueueActiveTaskExecutor) processResetWorkflow(
 		currentMutableState,
 		logger,
 	)
+}
+
+func (t *transferQueueActiveTaskExecutor) processStateMachineTask(
+	ctx context.Context,
+	task *tasks.StateMachineTransferTask,
+) error {
+	ref, smt, err := stateMachineTask(t.shardContext, task)
+	if err != nil {
+		return err
+	}
+
+	if err := validateTaskByClock(t.shardContext, task); err != nil {
+		return err
+	}
+
+	smRegistry := t.shardContext.StateMachineRegistry()
+	return smRegistry.ExecuteImmediateTask(ctx, t, ref, smt)
 }
 
 func (t *transferQueueActiveTaskExecutor) recordChildExecutionStarted(
@@ -1454,7 +1473,7 @@ func (t *transferQueueActiveTaskExecutor) resetWorkflow(
 	case *serviceerror.NotFound, *serviceerror.NamespaceNotFound:
 		// This means the reset point is corrupted and not retry able.
 		// There must be a bug in our system that we must fix.(for example, history is not the same in active/passive)
-		metrics.AutoResetPointCorruptionCounter.With(t.metricHandler).Record(
+		metrics.AutoResetPointCorruptionCounter.With(t.metricsHandler).Record(
 			1,
 			metrics.OperationTag(metrics.OperationTransferQueueProcessorScope),
 		)
@@ -1478,7 +1497,7 @@ func (t *transferQueueActiveTaskExecutor) processParentClosePolicy(
 		return nil
 	}
 
-	scope := t.metricHandler.WithTags(metrics.OperationTag(metrics.TransferActiveTaskCloseExecutionScope))
+	scope := t.metricsHandler.WithTags(metrics.OperationTag(metrics.TransferActiveTaskCloseExecutionScope))
 
 	if t.shardContext.GetConfig().EnableParentClosePolicyWorker() &&
 		len(childInfos) >= t.shardContext.GetConfig().ParentClosePolicyThreshold(parentNamespaceName) {

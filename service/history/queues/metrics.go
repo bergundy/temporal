@@ -39,7 +39,7 @@ import (
 func GetActiveTransferTaskTypeTagValue(
 	task tasks.Task,
 ) string {
-	switch task.(type) {
+	switch t := task.(type) {
 	case *tasks.ActivityTask:
 		return metrics.TaskTypeTransferActiveTaskActivity
 	case *tasks.WorkflowTask:
@@ -56,6 +56,8 @@ func GetActiveTransferTaskTypeTagValue(
 		return metrics.TaskTypeTransferActiveTaskResetWorkflow
 	case *tasks.DeleteExecutionTask:
 		return metrics.TaskTypeTransferActiveTaskDeleteExecution
+	case *tasks.StateMachineTransferTask:
+		return "TransferActive." + t.Info.Type
 	default:
 		return "TransferActive" + task.GetType().String()
 	}
@@ -64,7 +66,7 @@ func GetActiveTransferTaskTypeTagValue(
 func GetStandbyTransferTaskTypeTagValue(
 	task tasks.Task,
 ) string {
-	switch task.(type) {
+	switch t := task.(type) {
 	case *tasks.ActivityTask:
 		return metrics.TaskTypeTransferStandbyTaskActivity
 	case *tasks.WorkflowTask:
@@ -81,6 +83,8 @@ func GetStandbyTransferTaskTypeTagValue(
 		return metrics.TaskTypeTransferStandbyTaskResetWorkflow
 	case *tasks.DeleteExecutionTask:
 		return metrics.TaskTypeTransferStandbyTaskDeleteExecution
+	case *tasks.StateMachineTransferTask:
+		return "TransferStandby." + t.Info.Type
 	default:
 		return "TransferStandby" + task.GetType().String()
 	}
@@ -180,7 +184,7 @@ func GetOutboundTaskTypeTagValue(task tasks.Task, isActive bool) string {
 	if !ok {
 		return prefix + "Unknown"
 	}
-	return prefix + "." + outbound.StateMachineTaskType()
+	return prefix + "." + outbound.StateMachineTaskInfo().GetType()
 }
 
 func GetTimerStateMachineTaskTypeTagValue(taskType string, isActive bool) string {

@@ -34,7 +34,6 @@ import (
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/quotas"
 	ctasks "go.temporal.io/server/common/tasks"
-	"go.temporal.io/server/service/history/hsm"
 	"go.temporal.io/server/service/history/queues"
 	"go.temporal.io/server/service/history/shard"
 	"go.temporal.io/server/service/history/tasks"
@@ -331,37 +330,6 @@ func (f *outboundQueueFactory) CreateQueue(
 
 func getOutbountQueueProcessorMetricsHandler(handler metrics.Handler) metrics.Handler {
 	return handler.WithTags(metrics.OperationTag(metrics.OperationOutboundQueueProcessorScope))
-}
-
-func stateMachineTask(shardContext shard.Context, task tasks.Task) (hsm.Ref, hsm.Task, error) {
-	cbt, ok := task.(*tasks.StateMachineOutboundTask)
-	if !ok {
-		return hsm.Ref{}, nil, queues.NewUnprocessableTaskError("unknown task type")
-	}
-	def, ok := shardContext.StateMachineRegistry().TaskSerializer(cbt.Info.Type)
-	if !ok {
-		return hsm.Ref{},
-			nil,
-			queues.NewUnprocessableTaskError(
-				fmt.Sprintf("deserializer not registered for task type %v", cbt.Info.Type),
-			)
-	}
-	smt, err := def.Deserialize(cbt.Info.Data, hsm.TaskAttributes{Destination: cbt.Destination})
-	if err != nil {
-		return hsm.Ref{},
-			nil,
-			fmt.Errorf(
-				"%w: %w",
-				queues.NewUnprocessableTaskError(fmt.Sprintf("cannot deserialize task %v", cbt.Info.Type)),
-				err,
-			)
-	}
-	return hsm.Ref{
-		WorkflowKey:     taskWorkflowKey(task),
-		StateMachineRef: cbt.Info.Ref,
-		TaskID:          task.GetTaskID(),
-		Validate:        smt.Validate,
-	}, smt, nil
 }
 
 func getNamespaceNameOrDefault(

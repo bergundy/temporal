@@ -113,6 +113,8 @@ func (s *TaskSerializer) serializeTransferTask(
 		transferTask = s.transferResetTaskToProto(task)
 	case *tasks.DeleteExecutionTask:
 		transferTask = s.transferDeleteExecutionTaskToProto(task)
+	case *tasks.StateMachineTransferTask:
+		transferTask = s.transferStateMachineTaskToProto(task)
 	default:
 		return nil, serviceerror.NewInternal(fmt.Sprintf("Unknown transfer task type: %v", task))
 	}
@@ -146,6 +148,8 @@ func (s *TaskSerializer) deserializeTransferTasks(
 		task = s.transferResetTaskFromProto(transferTask)
 	case enumsspb.TASK_TYPE_TRANSFER_DELETE_EXECUTION:
 		task = s.transferDeleteExecutionTaskFromProto(transferTask)
+	case enumsspb.TASK_TYPE_STATE_MACHINE_TRANSFER:
+		task = s.transferStateMachineTaskFromProto(transferTask)
 	default:
 		return nil, serviceerror.NewInternal(fmt.Sprintf("Unknown transfer task type: %v", transferTask.TaskType))
 	}
@@ -645,6 +649,39 @@ func (s *TaskSerializer) transferDeleteExecutionTaskFromProto(
 		TaskID:              deleteExecutionTask.TaskId,
 		// Delete workflow task process stage is not persisted. It is only for in memory retries.
 		ProcessStage: tasks.DeleteWorkflowExecutionStageNone,
+	}
+}
+
+func (s *TaskSerializer) transferStateMachineTaskToProto(
+	task *tasks.StateMachineTransferTask,
+) *persistencespb.TransferTaskInfo {
+	return &persistencespb.TransferTaskInfo{
+		NamespaceId:    task.WorkflowKey.NamespaceID,
+		WorkflowId:     task.WorkflowKey.WorkflowID,
+		RunId:          task.WorkflowKey.RunID,
+		TaskType:       enumsspb.TASK_TYPE_STATE_MACHINE_TRANSFER,
+		TaskId:         task.TaskID,
+		VisibilityTime: timestamppb.New(task.VisibilityTimestamp),
+		TaskDetails: &persistencespb.TransferTaskInfo_StateMachineInfo{
+			StateMachineInfo: task.StateMachineTask.Info,
+		},
+	}
+}
+
+func (s *TaskSerializer) transferStateMachineTaskFromProto(
+	task *persistencespb.TransferTaskInfo,
+) *tasks.StateMachineTransferTask {
+	return &tasks.StateMachineTransferTask{
+		StateMachineTask: tasks.StateMachineTask{
+			WorkflowKey: definition.NewWorkflowKey(
+				task.NamespaceId,
+				task.WorkflowId,
+				task.RunId,
+			),
+			VisibilityTimestamp: task.VisibilityTime.AsTime(),
+			TaskID:              task.TaskId,
+			Info:                task.GetStateMachineInfo(),
+		},
 	}
 }
 

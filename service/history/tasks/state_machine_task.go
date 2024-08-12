@@ -38,7 +38,7 @@ type StateMachineTask struct {
 	Info                *persistence.StateMachineTaskInfo
 }
 
-var _ HasStateMachineTaskType = &StateMachineTask{}
+var _ HasStateMachineTaskInfo = &StateMachineTask{}
 
 func (t *StateMachineTask) GetTaskID() int64 {
 	return t.TaskID
@@ -56,8 +56,25 @@ func (t *StateMachineTask) SetVisibilityTime(timestamp time.Time) {
 	t.VisibilityTimestamp = timestamp
 }
 
-func (t *StateMachineTask) StateMachineTaskType() string {
-	return t.Info.Type
+func (t *StateMachineTask) StateMachineTaskInfo() *persistence.StateMachineTaskInfo {
+	return t.Info
+}
+
+// StateMachineTransferTask is a task on the outbound queue.
+type StateMachineTransferTask struct {
+	StateMachineTask
+}
+
+func (*StateMachineTransferTask) GetCategory() Category {
+	return CategoryTransfer
+}
+
+func (*StateMachineTransferTask) GetType() enums.TaskType {
+	return enums.TASK_TYPE_STATE_MACHINE_TRANSFER
+}
+
+func (t *StateMachineTransferTask) GetKey() Key {
+	return NewImmediateKey(t.TaskID)
 }
 
 // StateMachineOutboundTask is a task on the outbound queue.

@@ -83,7 +83,7 @@ func (t SchedulerActivateTask) Deadline() time.Time {
 }
 
 func (t SchedulerActivateTask) Destination() string {
-	return "TODO(bergundy): make this an empty string when we support transfer tasks"
+	return ""
 }
 
 func (SchedulerActivateTask) Validate(ref *persistencespb.StateMachineRef, node *hsm.Node) error {

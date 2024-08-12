@@ -291,6 +291,7 @@ message TransferTaskInfo {
     }
     oneof task_details {
         CloseExecutionTaskDetails close_execution_task_details = 16;
+        StateMachineTaskInfo state_machine_info = 17;
     }
 }
 

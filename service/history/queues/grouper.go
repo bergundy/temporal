@@ -72,10 +72,10 @@ func (GrouperStateMachineNamespaceIDAndDestination) KeyTyped(task tasks.Task) (k
 	if ok {
 		dest = destGetter.GetDestination()
 	}
-	smtGetter, ok := task.(tasks.HasStateMachineTaskType)
+	smtGetter, ok := task.(tasks.HasStateMachineTaskInfo)
 	var smt string
 	if ok {
-		smt = smtGetter.StateMachineTaskType()
+		smt = smtGetter.StateMachineTaskInfo().GetType()
 	}
 	return tasks.TaskGroupNamespaceIDAndDestination{
 		TaskGroup:   smt,

@@ -38,6 +38,7 @@ import (
 
 	"go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
+	"go.temporal.io/server/api/persistence/v1"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/backoff"
 	"go.temporal.io/server/common/circuitbreaker"
@@ -681,12 +682,12 @@ func (e *executableImpl) GetDestination() string {
 	return ""
 }
 
-// StateMachineTaskType returns the embedded task's state machine task type if it exists. Defaults to 0.
-func (e *executableImpl) StateMachineTaskType() string {
-	if t, ok := e.Task.(tasks.HasStateMachineTaskType); ok {
-		return t.StateMachineTaskType()
+// StateMachineTaskInfo returns the embedded task's state machine task info if it exists. Defaults to nil.
+func (e *executableImpl) StateMachineTaskInfo() *persistence.StateMachineTaskInfo {
+	if t, ok := e.Task.(tasks.HasStateMachineTaskInfo); ok {
+		return t.StateMachineTaskInfo()
 	}
-	return ""
+	return nil
 }
 
 func (e *executableImpl) shouldResubmitOnNack(attempt int, err error) bool {

@@ -44,6 +44,7 @@ import (
 	"go.temporal.io/server/common/resource"
 	"go.temporal.io/server/common/xdc"
 	"go.temporal.io/server/service/history/consts"
+	"go.temporal.io/server/service/history/hsm"
 	"go.temporal.io/server/service/history/ndc"
 	"go.temporal.io/server/service/history/queues"
 	"go.temporal.io/server/service/history/replication/eventhandler"
@@ -133,6 +134,8 @@ func (t *transferQueueStandbyTaskExecutor) Execute(
 		err = t.processCloseExecution(ctx, task)
 	case *tasks.DeleteExecutionTask:
 		err = t.processDeleteExecutionTask(ctx, task, false)
+	case *tasks.StateMachineTransferTask:
+		err = t.processStateMachineTask(ctx, task)
 	default:
 		err = errUnknownTransferTask
 	}
@@ -476,6 +479,47 @@ func (t *transferQueueStandbyTaskExecutor) processStartChildExecution(
 	)
 }
 
+func (t *transferQueueStandbyTaskExecutor) processStateMachineTask(
+	ctx context.Context,
+	task *tasks.StateMachineTransferTask,
+) error {
+	if err := validateTaskByClock(t.shardContext, task); err != nil {
+		return err
+	}
+
+	ref, _, err := stateMachineTask(t.shardContext, task)
+	if err != nil {
+		return err
+	}
+
+	// Use the Access function to Validate() the reference and node.
+	err = t.Access(ctx, ref, hsm.AccessRead, func(node *hsm.Node) error {
+		// If we managed to access the machine the task is still valid.
+		// The logic below will either discard it or retry.
+		return nil
+	})
+
+	if err != nil {
+		if errors.Is(err, consts.ErrStaleReference) {
+			// If the reference is stale, then the task was already executed in
+			// the active queue, and there is nothing to do here.
+			return nil
+		}
+		return err
+	}
+
+	// If there was no error from Access nor from the accessor function, then the task
+	// is still valid for processing based on the current state of the machine.
+	// The *likely* reasons are: a) delay in the replication stack; b) task is failing on the active cluster.
+	// In any case, the task needs to be retried.
+	discardTime := task.GetVisibilityTime().Add(t.config.StandbyTaskMissingEventsDiscardDelay(task.GetType()))
+	// now > task start time + discard delay
+	if t.Now().After(discardTime) {
+		return standbyTimerTaskPostActionTaskDiscarded(ctx, task, true /* ensure the discard is logged */, t.logger)
+	}
+	return consts.ErrTaskRetry
+}
+
 func (t *transferQueueStandbyTaskExecutor) processTransfer(
 	ctx context.Context,
 	processTaskIfClosed bool,
@@ -508,7 +552,7 @@ func (t *transferQueueStandbyTaskExecutor) processTransfer(
 		}
 	}()
 
-	mutableState, err := loadMutableStateForTransferTask(ctx, t.shardContext, weContext, taskInfo, t.metricHandler, t.logger)
+	mutableState, err := loadMutableStateForTransferTask(ctx, t.shardContext, weContext, taskInfo, t.metricsHandler, t.logger)
 	if err != nil || mutableState == nil {
 		return err
 	}
@@ -616,7 +660,7 @@ func (t *transferQueueStandbyTaskExecutor) fetchHistoryFromRemote(
 		return err
 	}
 
-	scope := t.metricHandler.WithTags(metrics.OperationTag(metrics.HistoryRereplicationByTransferTaskScope))
+	scope := t.metricsHandler.WithTags(metrics.OperationTag(metrics.HistoryRereplicationByTransferTaskScope))
 	metrics.ClientRequests.With(scope).Record(1)
 	startTime := time.Now().UTC()
 	defer func() { metrics.ClientLatency.With(scope).Record(time.Since(startTime)) }()

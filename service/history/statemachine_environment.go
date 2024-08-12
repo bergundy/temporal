@@ -39,6 +39,7 @@ import (
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/service/history/consts"
 	"go.temporal.io/server/service/history/hsm"
+	"go.temporal.io/server/service/history/queues"
 	"go.temporal.io/server/service/history/shard"
 	"go.temporal.io/server/service/history/tasks"
 	"go.temporal.io/server/service/history/workflow"
@@ -399,4 +400,39 @@ func (e *stateMachineEnvironment) Access(ctx context.Context, ref hsm.Ref, acces
 
 func (e *stateMachineEnvironment) Now() time.Time {
 	return e.shardContext.GetTimeSource().Now()
+}
+
+func stateMachineTask(shardContext shard.Context, task tasks.Task) (hsm.Ref, hsm.Task, error) {
+	cbt, ok := task.(tasks.HasStateMachineTaskInfo)
+	if !ok {
+		return hsm.Ref{}, nil, queues.NewUnprocessableTaskError("unknown task type")
+	}
+	def, ok := shardContext.StateMachineRegistry().TaskSerializer(cbt.StateMachineTaskInfo().GetType())
+	if !ok {
+		return hsm.Ref{},
+			nil,
+			queues.NewUnprocessableTaskError(
+				fmt.Sprintf("deserializer not registered for task type %v", cbt.StateMachineTaskInfo().GetType()),
+			)
+	}
+	var destination string
+	if getter, ok := task.(tasks.HasDestination); ok {
+		destination = getter.GetDestination()
+	}
+	smt, err := def.Deserialize(cbt.StateMachineTaskInfo().GetData(), hsm.TaskAttributes{Destination: destination, Deadline: task.GetVisibilityTime()})
+	if err != nil {
+		return hsm.Ref{},
+			nil,
+			fmt.Errorf(
+				"%w: %w",
+				queues.NewUnprocessableTaskError(fmt.Sprintf("cannot deserialize task %v", cbt.StateMachineTaskInfo().GetType())),
+				err,
+			)
+	}
+	return hsm.Ref{
+		WorkflowKey:     taskWorkflowKey(task),
+		StateMachineRef: cbt.StateMachineTaskInfo().GetRef(),
+		TaskID:          task.GetTaskID(),
+		Validate:        smt.Validate,
+	}, smt, nil
 }
