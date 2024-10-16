@@ -2,6 +2,8 @@ package chasm
 
 import (
 	"context"
+	"errors"
+	"reflect"
 	"time"
 )
 
@@ -33,6 +35,10 @@ func (*Entity) LoadComponent(key ComponentKey) (Component, error) {
 	panic("not implemented")
 }
 
+func LoadComponent[T Component](*Entity, ComponentKey) (T, error) {
+	panic("not implemented")
+}
+
 func (*Entity) CloneComponent(key ComponentKey) (Component, error) {
 	panic("not implemented")
 }
@@ -58,9 +64,11 @@ type ComponentKey struct {
 // User implements
 type Component interface {
 	// Fluff (optional / advanced)
-	Describe() any
-	AdminDescribe() any
+	// Describe() any
+	// AdminDescribe() any
 }
+
+var NoDeadline = time.Time{}
 
 type Task interface {
 	// Task type that must be unique per task definition.
@@ -87,32 +95,73 @@ type Ref struct {
 	ConsistencyToken ConsistencyToken
 }
 
-// TODO: figure out where this goes
-// Validate func(ConsistencyToken/*, missing concept */) error
+var ErrStaleReference = errors.New("stale reference")
 
 type TaskDefinition[T Task] interface {
 	RegisterableTaskDefinition
 
-	Validate(Ref, Entity, T) error
-	Execute(context.Context, Engine, Ref, T) error
+	Validate(ref Ref, ent *Entity, task T) error
+	Execute(ctx context.Context, engine Engine, ref Ref, task T) error
 	Serialize(task T) ([]byte, error)
 	Deserialize(data []byte, attrs TaskAttributes) (T, error)
 }
 
+type TaskDefinitionBase[T Task] struct {
+}
+
+func (TaskDefinitionBase[T]) mustEmbedBaseTaskDefinition() {
+}
+
+func (TaskDefinitionBase[T]) Type() reflect.Type {
+	var t [0]T
+	return reflect.TypeOf(t).Elem()
+}
+
 type RegisterableTaskDefinition interface {
-	mustEmbedBaseTaskDefintion()
+	Type() reflect.Type
+	mustEmbedBaseTaskDefinition()
 }
 
-type UnimplementedTaskDefinition[T Task] struct {
+type RPCDefinition[I, O any] interface {
+	InputType() reflect.Type
+	OutputType() reflect.Type
+
+	SerializeInput(input I) ([]byte, error)
 }
 
-func (UnimplementedTaskDefinition[T]) mustEmbedBaseTaskDefintion() {
+type RPCDefinitionBase[I, O any] struct {
+}
+
+func (RPCDefinitionBase[I, O]) SerializeInput(input I) ([]byte, error) {
+	panic("unimplemented")
+}
+
+func (RPCDefinitionBase[I, O]) mustEmbedBaseRPCDefinition() {
+}
+
+func (RPCDefinitionBase[I, O]) InputType() reflect.Type {
+	var i [0]I
+	return reflect.TypeOf(i).Elem()
+}
+
+func (RPCDefinitionBase[I, O]) OutputType() reflect.Type {
+	var o [0]O
+	return reflect.TypeOf(o).Elem()
+}
+
+var _ RPCDefinition[any, any] = RPCDefinitionBase[any, any]{}
+
+type RegisterableRPCDefinition interface {
+	InputType() reflect.Type
+	OutputType() reflect.Type
+
+	mustEmbedBaseRPCDefinition()
 }
 
 type Engine interface {
 	CreateEntity(ctx context.Context, key EntityKey, components map[string]Component) error
-	UpdateEntity(ctx context.Context, ref Ref, fn func(Entity, ComponentKey) error) error
-	ReadEntity(ctx context.Context, ref Ref, fn func(Entity, ComponentKey) error) error
+	UpdateEntity(ctx context.Context, ref Ref, fn func(*Entity, ComponentKey) error) error
+	ReadEntity(ctx context.Context, ref Ref, fn func(*Entity, ComponentKey) error) error
 	// Read2(ctx context.Context, ref Ref) (Entity, Component, error)
 	// ?
 	// Upsert(ctx context.Context, key EntityKey, components map[string]Component) error
@@ -121,5 +170,5 @@ type Engine interface {
 type Module interface {
 	Tasks() []RegisterableTaskDefinition
 	// Components() []RegisterableComponent
-	// RPCs() []RPC
+	RPCs() []RegisterableRPCDefinition
 }
