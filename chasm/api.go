@@ -45,6 +45,10 @@ func (*Entity) RemoveComponent(key ComponentKey) error {
 	panic("not implemented")
 }
 
+func (*Entity) AddTask(key ComponentKey, task Task) {
+	panic("not implemented")
+}
+
 type ComponentKey struct {
 	// Type is a way to prevent collisions where component authors don't need to be aware of other
 	// components in a given entity. Up for discussion.
