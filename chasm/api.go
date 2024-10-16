@@ -98,64 +98,53 @@ type Ref struct {
 var ErrStaleReference = errors.New("stale reference")
 
 type TaskDefinition[T Task] interface {
-	RegisterableTaskDefinition
-
 	Validate(ref Ref, ent *Entity, task T) error
 	Execute(ctx context.Context, engine Engine, ref Ref, task T) error
 	Serialize(task T) ([]byte, error)
 	Deserialize(data []byte, attrs TaskAttributes) (T, error)
 }
 
-type TaskDefinitionBase[T Task] struct {
+type RegisterableTaskDefinition struct {
+	typ reflect.Type
 }
 
-func (TaskDefinitionBase[T]) mustEmbedBaseTaskDefinition() {
+func (r RegisterableTaskDefinition) Type() reflect.Type {
+	return r.typ
 }
 
-func (TaskDefinitionBase[T]) Type() reflect.Type {
+func NewRegisterableTaskDefinition[T Task](def TaskDefinition[T]) RegisterableTaskDefinition {
 	var t [0]T
-	return reflect.TypeOf(t).Elem()
-}
-
-type RegisterableTaskDefinition interface {
-	Type() reflect.Type
-	mustEmbedBaseTaskDefinition()
+	typ := reflect.TypeOf(t).Elem()
+	return RegisterableTaskDefinition{typ}
 }
 
 type RPCDefinition[I, O any] interface {
-	InputType() reflect.Type
-	OutputType() reflect.Type
-
+	Name() string
 	SerializeInput(input I) ([]byte, error)
+	SerializeOutput(output O) ([]byte, error)
+	DeserializeInput(data []byte) (I, error)
+	DeserializeOutput(data []byte) (O, error)
 }
 
-type RPCDefinitionBase[I, O any] struct {
+type RegisterableRPCDefinition struct {
+	inputType  reflect.Type
+	outputType reflect.Type
 }
 
-func (RPCDefinitionBase[I, O]) SerializeInput(input I) ([]byte, error) {
-	panic("unimplemented")
-}
-
-func (RPCDefinitionBase[I, O]) mustEmbedBaseRPCDefinition() {
-}
-
-func (RPCDefinitionBase[I, O]) InputType() reflect.Type {
+func NewRegisterableRPCDefinition[I, O any](def RPCDefinition[I, O]) RegisterableRPCDefinition {
 	var i [0]I
-	return reflect.TypeOf(i).Elem()
-}
-
-func (RPCDefinitionBase[I, O]) OutputType() reflect.Type {
+	inputType := reflect.TypeOf(i).Elem()
 	var o [0]O
-	return reflect.TypeOf(o).Elem()
+	outputType := reflect.TypeOf(o).Elem()
+	return RegisterableRPCDefinition{inputType, outputType}
 }
 
-var _ RPCDefinition[any, any] = RPCDefinitionBase[any, any]{}
+func (d RegisterableRPCDefinition) InputType() reflect.Type {
+	return d.inputType
+}
 
-type RegisterableRPCDefinition interface {
-	InputType() reflect.Type
-	OutputType() reflect.Type
-
-	mustEmbedBaseRPCDefinition()
+func (d RegisterableRPCDefinition) OutputType() reflect.Type {
+	return d.outputType
 }
 
 type Engine interface {
