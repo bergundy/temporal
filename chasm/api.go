@@ -22,6 +22,116 @@ const (
 	RunStateZombie
 )
 
+type BaseComponent struct {
+}
+
+type Component2 interface {
+	Entity() *Entity2
+	Parent() Component2
+	Child(keys ...string) Component2
+	ReadChild(path []string, fn func(Component2) error) error
+	AddChild(key string, fn func(base *BaseComponent) (Component2, error)) error
+	UpdateChild(key string, fn func(Component2) error) error
+	DeleteChild(key string) bool
+
+	// ReadParent(path []string, fn func(Component2) error) error
+	// AddParent(key string, fn func(base *BaseComponent) (Component2, error)) error
+	// UpdateParent(key string, fn func(Component2) error) error
+
+	AddTask(Task)
+}
+
+func (*BaseComponent) Entity() *Entity2 {
+	panic("not implemented")
+}
+
+func (*BaseComponent) Parent() Component2 {
+	panic("not implemented")
+}
+
+func (*BaseComponent) Child(keys ...string) Component2 {
+	panic("not implemented")
+}
+
+func (*BaseComponent) ReadChild(path []string, fn func(Component2) error) error {
+	panic("not implemented")
+}
+
+func (*BaseComponent) AddChild(key string, fn func(base *BaseComponent) (Component2, error)) error {
+	panic("not implemented")
+}
+
+func (*BaseComponent) UpdateChild(key string, fn func(Component2) error) error {
+	panic("not implemented")
+}
+func (*BaseComponent) DeleteChild(key string) bool {
+	panic("not implemented")
+}
+func (*BaseComponent) AddTask(Task) {
+	panic("not implemented")
+}
+
+type Entity2 struct {
+	EntityKey
+
+	// Could also be a component.
+	RunState  RunState
+	StartTime time.Time
+	CloseTime time.Time
+}
+
+type Env interface {
+	CreateEntity(ctx context.Context, key EntityKey, ctor func(root *BaseComponent) (Component2, error)) error
+	UpdateEntity(ctx context.Context, key EntityKey, ctor func(root Component2) error) error
+}
+
+type Activity struct {
+	*BaseComponent
+}
+
+type Workflow struct {
+	*BaseComponent
+}
+
+func (w *Workflow) activity(id string) Activity {
+	// return w.Child("activities").Child(id).Data()
+	return w.Child("activities", id).(Activity)
+}
+
+func t() {
+	ctx := context.TODO()
+	var env Env
+	err := env.CreateEntity(ctx, EntityKey{}, func(root *BaseComponent) (Component2, error) {
+		w := &Workflow{
+			root,
+		}
+		w.AddTask(nil)
+		return w, nil
+	})
+	err = UpdateEntity(ctx, EntityKey{}, func(w Workflow) error {
+		_ = w.activity("some-id")
+		ReadChild([]string{"activities", "some-id"}, func(c Activity) error {
+			return nil
+		})
+		return w.AddChild("some-other-id", func(base *BaseComponent) (Component2, error) {
+			a := &Activity{
+				base,
+			}
+			a.AddTask(nil)
+			return a, nil
+		})
+	})
+	_ = err
+}
+
+func ReadChild[T Component2]([]string, func(T) error) error {
+	panic("not implemented")
+}
+
+func UpdateEntity[T Component2](context.Context, EntityKey, func(root T) error) error {
+	panic("not implemented")
+}
+
 type Entity struct {
 	EntityKey
 
