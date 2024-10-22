@@ -3,6 +3,7 @@ package chasm
 import (
 	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"time"
 )
@@ -43,10 +44,6 @@ func (*Entity) CloneComponent(key ComponentKey) (Component, error) {
 	panic("not implemented")
 }
 
-func (*Entity) TransitionComponent(key ComponentKey, fn func(Component) error) error {
-	panic("not implemented")
-}
-
 func (*Entity) RemoveComponent(key ComponentKey) error {
 	panic("not implemented")
 }
@@ -68,12 +65,54 @@ type Component interface {
 	// AdminDescribe() any
 }
 
+type ComponentDefinition[T Component] interface {
+	TypeName() string
+	Serialize(component T) ([]byte, error)
+	Deserialize(data []byte) (T, error)
+}
+
+type RegisterableComponentDefinition interface {
+	TypeName() string
+	ReflectType() reflect.Type
+	mustImplementRegisterableComponentDefinition()
+}
+
+type registerableComponentDefinition[T Component] struct {
+	ComponentDefinition[T]
+	typ reflect.Type
+}
+
+func (registerableComponentDefinition[T]) mustImplementRegisterableComponentDefinition() {}
+
+func (r registerableComponentDefinition[T]) ReflectType() reflect.Type {
+	return r.typ
+}
+
+func (r registerableComponentDefinition[T]) Serialize(component Component) ([]byte, error) {
+	t, ok := component.(T)
+	if !ok {
+		return nil, fmt.Errorf("TODO")
+	}
+
+	return r.ComponentDefinition.Serialize(t)
+}
+
+func (r registerableComponentDefinition[T]) Deserialize(data []byte) (Component, error) {
+	return r.ComponentDefinition.Deserialize(data)
+}
+
+func NewRegisterableComponentDefinition[T Component](def ComponentDefinition[T]) RegisterableComponentDefinition {
+	var t [0]T
+	typ := reflect.TypeOf(t).Elem()
+	return registerableComponentDefinition[T]{
+		ComponentDefinition: def,
+		typ:                 typ,
+	}
+}
+
 var NoDeadline = time.Time{}
 
 type Task interface {
-	// Task type that must be unique per task definition.
-	Type() string
-
 	Deadline() time.Time
 	// This approach works for 99% of the use cases we have in mind.
 	Destination() string
@@ -98,6 +137,9 @@ type Ref struct {
 var ErrStaleReference = errors.New("stale reference")
 
 type TaskDefinition[T Task] interface {
+	// Task type that must be unique per task definition.
+	TypeName() string
+
 	Validate(ref Ref, ent *Entity, task T) error
 	Execute(ctx context.Context, engine Engine, ref Ref, task T) error
 	Serialize(task T) ([]byte, error)
@@ -157,7 +199,7 @@ type Engine interface {
 }
 
 type Module interface {
+	Components() []RegisterableComponentDefinition
 	Tasks() []RegisterableTaskDefinition
-	// Components() []RegisterableComponent
 	RPCs() []RegisterableRPCDefinition
 }

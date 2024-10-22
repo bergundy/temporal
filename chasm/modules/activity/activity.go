@@ -11,6 +11,11 @@ import (
 type Module struct {
 }
 
+func (Module) Components() (defs []chasm.RegisterableComponentDefinition) {
+	defs = append(defs, chasm.NewRegisterableComponentDefinition(&StateMachineDefinition{}))
+	return
+}
+
 func (Module) Tasks() (defs []chasm.RegisterableTaskDefinition) {
 	defs = append(defs, chasm.NewRegisterableTaskDefinition(&ScheduleTaskDefinition{}))
 	return
@@ -33,6 +38,24 @@ type StateMachine struct {
 	State State
 }
 
+type StateMachineDefinition struct {
+}
+
+// Deserialize implements chasm.ComponentDefinition.
+func (*StateMachineDefinition) TypeName() string {
+	panic("unimplemented")
+}
+
+// Deserialize implements chasm.ComponentDefinition.
+func (*StateMachineDefinition) Deserialize(data []byte) (StateMachine, error) {
+	panic("unimplemented")
+}
+
+// Serialize implements chasm.ComponentDefinition.
+func (*StateMachineDefinition) Serialize(component StateMachine) ([]byte, error) {
+	panic("unimplemented")
+}
+
 type ScheduleTask struct{}
 
 func (ScheduleTask) Deadline() time.Time {
@@ -41,11 +64,6 @@ func (ScheduleTask) Deadline() time.Time {
 
 func (ScheduleTask) Destination() string {
 	return ""
-}
-
-// Type implements chasm.Task.
-func (ScheduleTask) Type() string {
-	panic("unimplemented")
 }
 
 var _ chasm.Task = ScheduleTask{}
@@ -67,6 +85,11 @@ func (*ScheduleTaskDefinition) Validate(ref chasm.Ref, ent *chasm.Entity, task S
 		return chasm.ErrStaleReference
 	}
 	return nil
+}
+
+// Type implements chasm.Task.
+func (*ScheduleTaskDefinition) TypeName() string {
+	panic("unimplemented")
 }
 
 func (d *ScheduleTaskDefinition) Execute(ctx context.Context, engine chasm.Engine, ref chasm.Ref, task ScheduleTask) error {
