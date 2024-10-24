@@ -8,6 +8,7 @@ import (
 )
 
 // Names in this API are not final, structure is up for debate.
+// Alternatives for Execution: StateMachine, Entity, Process
 
 type EntityKey struct {
 	// Not sure if we need FirstExecutionRunID here, it may not always be applicable...
@@ -22,56 +23,7 @@ const (
 	RunStateZombie
 )
 
-type BaseComponent struct {
-}
-
-type Component2 interface {
-	Entity() *Entity2
-	Parent() Component2
-	Child(keys ...string) Component2
-	ReadChild(path []string, fn func(Component2) error) error
-	AddChild(key string, fn func(base *BaseComponent) (Component2, error)) error
-	UpdateChild(key string, fn func(Component2) error) error
-	DeleteChild(key string) bool
-
-	// ReadParent(path []string, fn func(Component2) error) error
-	// AddParent(key string, fn func(base *BaseComponent) (Component2, error)) error
-	// UpdateParent(key string, fn func(Component2) error) error
-
-	AddTask(Task)
-}
-
-func (*BaseComponent) Entity() *Entity2 {
-	panic("not implemented")
-}
-
-func (*BaseComponent) Parent() Component2 {
-	panic("not implemented")
-}
-
-func (*BaseComponent) Child(keys ...string) Component2 {
-	panic("not implemented")
-}
-
-func (*BaseComponent) ReadChild(path []string, fn func(Component2) error) error {
-	panic("not implemented")
-}
-
-func (*BaseComponent) AddChild(key string, fn func(base *BaseComponent) (Component2, error)) error {
-	panic("not implemented")
-}
-
-func (*BaseComponent) UpdateChild(key string, fn func(Component2) error) error {
-	panic("not implemented")
-}
-func (*BaseComponent) DeleteChild(key string) bool {
-	panic("not implemented")
-}
-func (*BaseComponent) AddTask(Task) {
-	panic("not implemented")
-}
-
-type Entity2 struct {
+type Entity struct {
 	EntityKey
 
 	// Could also be a component.
@@ -80,9 +32,61 @@ type Entity2 struct {
 	CloseTime time.Time
 }
 
-type Env interface {
-	CreateEntity(ctx context.Context, key EntityKey, ctor func(root *BaseComponent) (Component2, error)) error
-	UpdateEntity(ctx context.Context, key EntityKey, ctor func(root Component2) error) error
+type Component interface {
+	Entity() Entity
+
+	Parent() Component
+	setParent(Component)
+
+	Child(keys ...string) Component
+	SpawnChild(key string, ctor func(component *BaseComponent) (Component, error)) error
+	DeleteChild(key string) bool
+
+	AddTask(Task)
+}
+
+type BaseComponent struct {
+}
+
+func (*BaseComponent) Entity() Entity {
+	panic("not implemented")
+}
+
+func (*BaseComponent) Parent() Component {
+	panic("not implemented")
+}
+
+func (*BaseComponent) setParent(comp Component) {
+	panic("not implemented")
+}
+
+func (*BaseComponent) Child(keys ...string) Component {
+	panic("not implemented")
+}
+
+func (*BaseComponent) SpawnChild(key string, ctor func(component *BaseComponent) (Component, error)) error {
+	panic("not implemented")
+}
+
+// func (*BaseComponent) SetChild(key string, comp Component2) {
+// 	panic("not implemented")
+// }
+
+func (*BaseComponent) DeleteChild(key string) bool {
+	panic("not implemented")
+}
+
+func (*BaseComponent) AddTask(Task) {
+	panic("not implemented")
+}
+
+type Environment interface {
+	CreateEntity(ctx context.Context, key EntityKey, ctor func(root *BaseComponent) (Component, error)) error
+	UpdateEntity(ctx context.Context, key EntityKey, ctor func(root Component) error) error
+	ReadEntity(ctx context.Context, key EntityKey, ctor func(root Component) error) error
+
+	UpdateComponent(ctx context.Context, entityKey EntityKey, ComponentKey, ctor func(root Component) error) error
+	ReadComponent(ctx context.Context, entityKey EntityKey, ComponentKey, ctor func(root Component) error) error
 }
 
 type Activity struct {
@@ -94,14 +98,14 @@ type Workflow struct {
 }
 
 func (w *Workflow) activity(id string) Activity {
-	// return w.Child("activities").Child(id).Data()
-	return w.Child("activities", id).(Activity)
+	return ChildComponent[Activity]("activities", id)
+	// return w.Child("activities", id).(Activity)
 }
 
 func t() {
 	ctx := context.TODO()
-	var env Env
-	err := env.CreateEntity(ctx, EntityKey{}, func(root *BaseComponent) (Component2, error) {
+	var env Environment
+	err := env.CreateEntity(ctx, EntityKey{}, func(root *BaseComponent) (Component, error) {
 		w := &Workflow{
 			root,
 		}
@@ -110,10 +114,7 @@ func t() {
 	})
 	err = UpdateEntity(ctx, EntityKey{}, func(w Workflow) error {
 		_ = w.activity("some-id")
-		ReadChild([]string{"activities", "some-id"}, func(c Activity) error {
-			return nil
-		})
-		return w.AddChild("some-other-id", func(base *BaseComponent) (Component2, error) {
+		return w.Child("activities").SpawnChild("some-other-id", func(base *BaseComponent) (Component, error) {
 			a := &Activity{
 				base,
 			}
@@ -124,44 +125,11 @@ func t() {
 	_ = err
 }
 
-func ReadChild[T Component2]([]string, func(T) error) error {
+func ChildComponent[T Component](path ...string) T {
 	panic("not implemented")
 }
 
-func UpdateEntity[T Component2](context.Context, EntityKey, func(root T) error) error {
-	panic("not implemented")
-}
-
-type Entity struct {
-	EntityKey
-
-	// Could also be a component.
-	RunState  RunState
-	StartTime time.Time
-	CloseTime time.Time
-}
-
-func (*Entity) LoadComponent(key ComponentKey) (Component, error) {
-	panic("not implemented")
-}
-
-func LoadComponent[T Component](*Entity, ComponentKey) (T, error) {
-	panic("not implemented")
-}
-
-func (*Entity) CloneComponent(key ComponentKey) (Component, error) {
-	panic("not implemented")
-}
-
-func (*Entity) TransitionComponent(key ComponentKey, fn func(Component) error) error {
-	panic("not implemented")
-}
-
-func (*Entity) RemoveComponent(key ComponentKey) error {
-	panic("not implemented")
-}
-
-func (*Entity) AddTask(key ComponentKey, task Task) {
+func UpdateEntity[T Component](context.Context, EntityKey, func(root T) error) error {
 	panic("not implemented")
 }
 
@@ -171,19 +139,9 @@ type ComponentKey struct {
 	Type, ID string
 }
 
-// User implements
-type Component interface {
-	// Fluff (optional / advanced)
-	// Describe() any
-	// AdminDescribe() any
-}
-
 var NoDeadline = time.Time{}
 
 type Task interface {
-	// Task type that must be unique per task definition.
-	Type() string
-
 	Deadline() time.Time
 	// This approach works for 99% of the use cases we have in mind.
 	Destination() string
@@ -208,6 +166,9 @@ type Ref struct {
 var ErrStaleReference = errors.New("stale reference")
 
 type TaskDefinition[T Task] interface {
+	// Task type that must be unique per task definition.
+	TypeName() string
+
 	Validate(ref Ref, ent *Entity, task T) error
 	Execute(ctx context.Context, engine Engine, ref Ref, task T) error
 	Serialize(task T) ([]byte, error)
