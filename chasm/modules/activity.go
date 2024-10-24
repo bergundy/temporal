@@ -4,33 +4,49 @@ import (
 	"context"
 	"time"
 
+	"github.com/nexus-rpc/sdk-go/nexus"
 	"go.temporal.io/server/api/matchingservice/v1"
 	"go.temporal.io/server/chasm"
 )
 
-type Module struct {
+type Library struct {
 }
 
-func (Module) Tasks() (defs []chasm.RegisterableTaskDefinition) {
+// Components implements chasm.Library.
+func (Library) Components() []chasm.RegisterableComponentDefinition {
+	panic("unimplemented")
+}
+
+func (Library) Tasks() (defs []chasm.RegisterableTaskDefinition) {
 	defs = append(defs, chasm.NewRegisterableTaskDefinition(&ScheduleTaskDefinition{}))
 	return
 }
 
-func (Module) RPCs() (defs []chasm.RegisterableRPCDefinition) {
-	defs = append(defs, chasm.NewRegisterableRPCDefinition(&RecordTaskStartedRPC{}))
+func (Library) Services() (defs []*nexus.Service) {
+	service := nexus.NewService("activity")
+	_ = service.Register(recordTaskStartedOperation)
+	defs = append(defs, service)
 	return
 }
 
-var _ chasm.Module = Module{}
+var _ chasm.Library = Library{}
 
-type State int
+// TODO: Some proto enum.
+type Status int
 
 const (
-	StateScheduled = State(iota)
+	StatusScheduled = Status(iota)
+	StatusStarted
 )
 
+// TODO: Some proto struct.
+type State struct {
+	Status Status
+}
+
 type StateMachine struct {
-	State State
+	*chasm.BaseComponent
+	state State
 }
 
 type ScheduleTask struct{}
@@ -43,27 +59,22 @@ func (ScheduleTask) Destination() string {
 	return ""
 }
 
-// Type implements chasm.Task.
-func (ScheduleTask) Type() string {
-	panic("unimplemented")
-}
-
 var _ chasm.Task = ScheduleTask{}
 
 type ScheduleTaskDefinition struct {
 	matchingClient matchingservice.MatchingServiceClient
 }
 
-func (*ScheduleTaskDefinition) Validate(ref chasm.Ref, ent *chasm.Entity, task ScheduleTask) error {
-	if ent.RunState != chasm.RunStateRunning {
+// Type implements chasm.Task.
+func (*ScheduleTaskDefinition) TypeName() string {
+	return "schedule"
+}
+
+func (*ScheduleTaskDefinition) Validate(ref chasm.Ref, comp chasm.Component, task ScheduleTask) error {
+	if comp.Execution().RunState != chasm.RunStateRunning {
 		return chasm.ErrStaleReference
 	}
-	sm, err := chasm.LoadComponent[StateMachine](ent, ref.ComponentKey)
-	if err != nil {
-		return err
-	}
-
-	if sm.State != StateScheduled {
+	if comp.(StateMachine).state.Status != StatusScheduled {
 		return chasm.ErrStaleReference
 	}
 	return nil
@@ -79,11 +90,7 @@ func (d *ScheduleTaskDefinition) Execute(ctx context.Context, engine chasm.Engin
 }
 
 func (*ScheduleTaskDefinition) loadRequest(ctx context.Context, engine chasm.Engine, ref chasm.Ref, task ScheduleTask) (request *matchingservice.AddActivityTaskRequest, err error) {
-	err = engine.ReadEntity(ctx, ref, func(e *chasm.Entity, ck chasm.ComponentKey) error {
-		_, err := chasm.LoadComponent[StateMachine](e, ck)
-		if err != nil {
-			return err
-		}
+	err = chasm.ReadComponent(ctx, engine, ref, func(root StateMachine) error {
 		// TODO: Populate with data from state machine.
 		request = &matchingservice.AddActivityTaskRequest{}
 		return nil
@@ -99,33 +106,23 @@ func (*ScheduleTaskDefinition) Deserialize(data []byte, attrs chasm.TaskAttribut
 	return ScheduleTask{}, nil
 }
 
+// This will have codegen.
 type RecordTaskStartedRequest struct {
+	Ref chasm.Ref
 }
 
 type RecordTaskStartedResponse struct {
 }
 
-type RecordTaskStartedRPC struct {
-}
+var recordTaskStartedOperation = chasm.NewSyncOperation[*RecordTaskStartedRequest, *RecordTaskStartedResponse]("RecordTaskStarted", func(ctx context.Context, engine chasm.Engine, request *RecordTaskStartedRequest, options nexus.StartOperationOptions) (*RecordTaskStartedResponse, error) {
+	err := chasm.UpdateComponent(ctx, engine, request.Ref, func(sm StateMachine) error {
+		// Transition only from Scheduled and other validations.
+		sm.state.Status = StatusStarted
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
 
-func (RecordTaskStartedRPC) Name() string {
-	panic("unimplemented")
-}
-
-func (RecordTaskStartedRPC) SerializeInput(input RecordTaskStartedRequest) ([]byte, error) {
-	panic("unimplemented")
-}
-
-func (RecordTaskStartedRPC) SerializeOutput(output RecordTaskStartedResponse) ([]byte, error) {
-	panic("unimplemented")
-}
-
-func (RecordTaskStartedRPC) DeserializeInput(data []byte) (RecordTaskStartedRequest, error) {
-	panic("unimplemented")
-}
-
-func (RecordTaskStartedRPC) DeserializeOutput(data []byte) (RecordTaskStartedResponse, error) {
-	panic("unimplemented")
-}
-
-var _ chasm.RPCDefinition[RecordTaskStartedRequest, RecordTaskStartedResponse] = RecordTaskStartedRPC{}
+	return &RecordTaskStartedResponse{}, nil
+})
