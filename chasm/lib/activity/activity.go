@@ -13,8 +13,9 @@ type Library struct {
 }
 
 // Components implements chasm.Library.
-func (Library) Components() []chasm.RegisterableComponentDefinition {
-	panic("unimplemented")
+func (Library) Components() (defs []chasm.RegisterableComponentDefinition) {
+	defs = append(defs, chasm.NewRegisterableComponentDefinition(&stateMachineDefinition{}))
+	return
 }
 
 func (Library) Tasks() (defs []chasm.RegisterableTaskDefinition) {
@@ -45,8 +46,34 @@ type State struct {
 }
 
 type StateMachine struct {
-	*chasm.BaseComponent
-	state State
+	*chasm.ComponentBase
+	state *State
+}
+
+func NewStateMachine(base *chasm.ComponentBase) (chasm.Component, error) {
+	sm := StateMachine{
+		base,
+		&State{
+			Status: StatusScheduled,
+		},
+	}
+	sm.AddTask(ScheduleTask{})
+	return sm, nil
+}
+
+type stateMachineDefinition struct {
+}
+
+func (*stateMachineDefinition) Deserialize(data []byte, base *chasm.ComponentBase) (StateMachine, error) {
+	panic("unimplemented")
+}
+
+func (*stateMachineDefinition) Serialize(component StateMachine) ([]byte, error) {
+	panic("unimplemented")
+}
+
+func (*stateMachineDefinition) TypeName() string {
+	panic("unimplemented")
 }
 
 type ScheduleTask struct{}
@@ -125,4 +152,22 @@ var recordTaskStartedOperation = chasm.NewSyncOperation[*RecordTaskStartedReques
 	}
 
 	return &RecordTaskStartedResponse{}, nil
+})
+
+// This will have codegen.
+type StartRequest struct {
+	NamespaceID, ID string
+}
+
+type StartResponse struct {
+}
+
+var startOperation = chasm.NewSyncOperation("Start", func(ctx context.Context, engine chasm.Engine, request *StartRequest, options nexus.StartOperationOptions) (*StartResponse, error) {
+	key := chasm.ExecutionKey{NamespaceID: request.NamespaceID, ExecutionID: request.ID}
+	err := engine.CreateExecution(ctx, key, NewStateMachine)
+	if err != nil {
+		return nil, err
+	}
+
+	return &StartResponse{}, nil
 })

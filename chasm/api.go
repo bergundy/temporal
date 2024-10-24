@@ -45,32 +45,32 @@ type Component interface {
 	setParent(Component)
 
 	Child(keys ...string) Component
-	SpawnChild(key string, ctor func(component *BaseComponent) (Component, error)) error
+	SpawnChild(key string, ctor func(component *ComponentBase) (Component, error)) error
 	DeleteChild(key string) bool
 
 	AddTask(Task)
 }
 
-type BaseComponent struct {
+type ComponentBase struct {
 }
 
-func (*BaseComponent) Execution() *Execution {
+func (*ComponentBase) Execution() *Execution {
 	panic("not implemented")
 }
 
-func (*BaseComponent) Parent() Component {
+func (*ComponentBase) Parent() Component {
 	panic("not implemented")
 }
 
-func (*BaseComponent) setParent(comp Component) {
+func (*ComponentBase) setParent(comp Component) {
 	panic("not implemented")
 }
 
-func (*BaseComponent) Child(keys ...string) Component {
+func (*ComponentBase) Child(keys ...string) Component {
 	panic("not implemented")
 }
 
-func (*BaseComponent) SpawnChild(key string, ctor func(component *BaseComponent) (Component, error)) error {
+func (*ComponentBase) SpawnChild(key string, ctor func(component *ComponentBase) (Component, error)) error {
 	panic("not implemented")
 }
 
@@ -78,18 +78,18 @@ func (*BaseComponent) SpawnChild(key string, ctor func(component *BaseComponent)
 // 	panic("not implemented")
 // }
 
-func (*BaseComponent) DeleteChild(key string) bool {
+func (*ComponentBase) DeleteChild(key string) bool {
 	panic("not implemented")
 }
 
-func (*BaseComponent) AddTask(Task) {
+func (*ComponentBase) AddTask(Task) {
 	panic("not implemented")
 }
 
 type ComponentDefinition[T Component] interface {
 	TypeName() string
 	Serialize(component T) ([]byte, error)
-	Deserialize(data []byte, base *BaseComponent) (T, error)
+	Deserialize(data []byte, base *ComponentBase) (T, error)
 }
 
 type RegisterableComponentDefinition interface {
@@ -117,7 +117,7 @@ func (r registerableComponentDefinition[T]) Serialize(component Component) ([]by
 	return r.ComponentDefinition.Serialize(t)
 }
 
-func (r registerableComponentDefinition[T]) Deserialize(data []byte, base *BaseComponent) (Component, error) {
+func (r registerableComponentDefinition[T]) Deserialize(data []byte, base *ComponentBase) (Component, error) {
 	return r.ComponentDefinition.Deserialize(data, base)
 }
 
@@ -131,7 +131,7 @@ func NewRegisterableComponentDefinition[T Component](def ComponentDefinition[T])
 }
 
 type Engine interface {
-	CreateExecution(ctx context.Context, key ExecutionKey, ctor func(root *BaseComponent) (Component, error)) error
+	CreateExecution(ctx context.Context, key ExecutionKey, ctor func(root *ComponentBase) (Component, error)) error
 
 	// Do we just want functions to access components directly?
 	UpdateExecution(ctx context.Context, key ExecutionKey, token ConsistencyToken, ctor func(root Component) error) error
@@ -139,42 +139,6 @@ type Engine interface {
 
 	UpdateComponent(ctx context.Context, ref Ref, ctor func(root Component) error) error
 	ReadComponent(ctx context.Context, ref Ref, ctor func(root Component) error) error
-}
-
-type Activity struct {
-	*BaseComponent
-}
-
-type Workflow struct {
-	*BaseComponent
-}
-
-func (w *Workflow) activity(id string) Activity {
-	return ChildComponent[Activity]("activities", id)
-	// return w.Child("activities", id).(Activity)
-}
-
-func t() {
-	ctx := context.TODO()
-	var env Engine
-	err := env.CreateExecution(ctx, ExecutionKey{}, func(root *BaseComponent) (Component, error) {
-		w := &Workflow{
-			root,
-		}
-		w.AddTask(nil)
-		return w, nil
-	})
-	err = UpdateExecution(ctx, ExecutionKey{}, ConsistencyToken{}, func(w Workflow) error {
-		_ = w.activity("some-id")
-		return w.Child("activities").SpawnChild("some-other-id", func(base *BaseComponent) (Component, error) {
-			a := &Activity{
-				base,
-			}
-			a.AddTask(nil)
-			return a, nil
-		})
-	})
-	_ = err
 }
 
 func ChildComponent[T Component](path ...string) T {
