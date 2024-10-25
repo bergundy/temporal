@@ -12,12 +12,13 @@ type Library struct {
 }
 
 // Components implements chasm.Library.
-func (Library) Components() []chasm.RegisterableComponentDefinition {
-	panic("unimplemented")
+func (Library) Components() (defs []chasm.RegisterableComponentDefinition) {
+	defs = append(defs, chasm.NewRegisterableComponentDefinition(&workflowDefinition{}))
+	return
 }
 
 func (Library) Tasks() (defs []chasm.RegisterableTaskDefinition) {
-	return
+	panic("unimplemented")
 }
 
 func (Library) Services() (defs []*nexus.Service) {
@@ -33,27 +34,27 @@ var _ chasm.Library = Library{}
 type State struct {
 }
 
-type StateMachine struct {
+type Workflow struct {
 	*chasm.ComponentBase
 	state *State
 }
 
-func (w StateMachine) activity(id string) activity.StateMachine {
+func (w Workflow) activity(id string) activity.StateMachine {
 	return chasm.ChildComponent[activity.StateMachine]("activities", id)
 }
 
-type stateMachineDefinition struct {
+type workflowDefinition struct {
 }
 
-func (*stateMachineDefinition) Deserialize(data []byte, base *chasm.ComponentBase) (StateMachine, error) {
+func (*workflowDefinition) Deserialize(data []byte, base *chasm.ComponentBase) (Workflow, error) {
 	panic("unimplemented")
 }
 
-func (*stateMachineDefinition) Serialize(component StateMachine) ([]byte, error) {
+func (*workflowDefinition) Serialize(component Workflow) ([]byte, error) {
 	panic("unimplemented")
 }
 
-func (*stateMachineDefinition) TypeName() string {
+func (*workflowDefinition) TypeName() string {
 	panic("unimplemented")
 }
 
@@ -68,7 +69,7 @@ type StartResponse struct {
 var startOperation = chasm.NewSyncOperation("Start", func(ctx context.Context, engine chasm.Engine, request *StartRequest, options nexus.StartOperationOptions) (*StartResponse, error) {
 	key := chasm.ExecutionKey{NamespaceID: request.NamespaceID, ExecutionID: request.ID}
 	err := engine.CreateExecution(ctx, key, func(base *chasm.ComponentBase) (chasm.Component, error) {
-		sm := StateMachine{
+		sm := Workflow{
 			base,
 			&State{},
 		}
@@ -90,7 +91,7 @@ type CompleteTaskResponse struct {
 }
 
 var completeTaskOperation = chasm.NewSyncOperation("CompleteTask", func(ctx context.Context, engine chasm.Engine, request *CompleteTaskRequest, options nexus.StartOperationOptions) (*CompleteTaskResponse, error) {
-	err := chasm.UpdateComponent(ctx, engine, request.Ref, func(sm StateMachine) error {
+	err := chasm.UpdateComponent(ctx, engine, request.Ref, func(sm Workflow) error {
 		return sm.Child("activities").SpawnChild("some-id", activity.NewStateMachine)
 	})
 	if err != nil {

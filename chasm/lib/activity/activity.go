@@ -14,7 +14,7 @@ type Library struct {
 
 // Components implements chasm.Library.
 func (Library) Components() (defs []chasm.RegisterableComponentDefinition) {
-	defs = append(defs, chasm.NewRegisterableComponentDefinition(&stateMachineDefinition{}))
+	defs = append(defs, chasm.NewRegisterableComponentDefinition(&activityDefintion{}))
 	return
 }
 
@@ -45,13 +45,13 @@ type State struct {
 	Status Status
 }
 
-type StateMachine struct {
+type Activity struct {
 	*chasm.ComponentBase
 	state *State
 }
 
 func NewStateMachine(base *chasm.ComponentBase) (chasm.Component, error) {
-	sm := StateMachine{
+	sm := Activity{
 		base,
 		&State{
 			Status: StatusScheduled,
@@ -61,18 +61,18 @@ func NewStateMachine(base *chasm.ComponentBase) (chasm.Component, error) {
 	return sm, nil
 }
 
-type stateMachineDefinition struct {
+type activityDefintion struct {
 }
 
-func (*stateMachineDefinition) Deserialize(data []byte, base *chasm.ComponentBase) (StateMachine, error) {
+func (*activityDefintion) Deserialize(data []byte, base *chasm.ComponentBase) (Activity, error) {
 	panic("unimplemented")
 }
 
-func (*stateMachineDefinition) Serialize(component StateMachine) ([]byte, error) {
+func (*activityDefintion) Serialize(component Activity) ([]byte, error) {
 	panic("unimplemented")
 }
 
-func (*stateMachineDefinition) TypeName() string {
+func (*activityDefintion) TypeName() string {
 	panic("unimplemented")
 }
 
@@ -101,7 +101,7 @@ func (*ScheduleTaskDefinition) Validate(ref chasm.Ref, comp chasm.Component, tas
 	if comp.Execution().RunState != chasm.RunStateRunning {
 		return chasm.ErrStaleReference
 	}
-	if comp.(StateMachine).state.Status != StatusScheduled {
+	if comp.(Activity).state.Status != StatusScheduled {
 		return chasm.ErrStaleReference
 	}
 	return nil
@@ -117,7 +117,7 @@ func (d *ScheduleTaskDefinition) Execute(ctx context.Context, engine chasm.Engin
 }
 
 func (*ScheduleTaskDefinition) loadRequest(ctx context.Context, engine chasm.Engine, ref chasm.Ref, task ScheduleTask) (request *matchingservice.AddActivityTaskRequest, err error) {
-	err = chasm.ReadComponent(ctx, engine, ref, func(root StateMachine) error {
+	err = chasm.ReadComponent(ctx, engine, ref, func(root Activity) error {
 		// TODO: Populate with data from state machine.
 		request = &matchingservice.AddActivityTaskRequest{}
 		return nil
@@ -142,7 +142,7 @@ type RecordTaskStartedResponse struct {
 }
 
 var recordTaskStartedOperation = chasm.NewSyncOperation[*RecordTaskStartedRequest, *RecordTaskStartedResponse]("RecordTaskStarted", func(ctx context.Context, engine chasm.Engine, request *RecordTaskStartedRequest, options nexus.StartOperationOptions) (*RecordTaskStartedResponse, error) {
-	err := chasm.UpdateComponent(ctx, engine, request.Ref, func(sm StateMachine) error {
+	err := chasm.UpdateComponent(ctx, engine, request.Ref, func(sm Activity) error {
 		// Transition only from Scheduled and other validations.
 		sm.state.Status = StatusStarted
 		return nil

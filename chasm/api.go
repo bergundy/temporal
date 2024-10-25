@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"iter"
 	"reflect"
 	"time"
 
@@ -43,6 +44,9 @@ type Component interface {
 
 	Parent() Component
 	setParent(Component)
+
+	Path() []string
+	Walk() iter.Seq[Component]
 
 	Child(keys ...string) Component
 	SpawnChild(key string, ctor func(component *ComponentBase) (Component, error)) error
