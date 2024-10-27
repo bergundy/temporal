@@ -2,6 +2,7 @@ package display
 
 import (
 	"context"
+	"encoding/json"
 
 	"github.com/nexus-rpc/sdk-go/nexus"
 	"go.temporal.io/server/chasm"
@@ -27,16 +28,34 @@ func (Library) Services() (services []*nexus.Service) {
 	return
 }
 
+// NOTE all of this will be in proto definitions. Actual structure of Describe and List operations is not yet defined, this is just an example.
 type DescribeRequest struct {
 	Key chasm.ExecutionKey
 }
 
 type DescribeResponse struct {
+	Components []ComponentDescription
+}
+
+type ComponentDescription struct {
+	Path []string
+	Data json.RawMessage
+}
+
+type Describable interface {
+	Describe() json.RawMessage
 }
 
 var describeOperation = chasm.NewSyncOperation("Describe", func(ctx context.Context, engine chasm.Engine, request *DescribeRequest, options nexus.StartOperationOptions) (*DescribeResponse, error) {
+	descriptions := make([]ComponentDescription, 0)
 	err := engine.ReadExecution(ctx, request.Key, nil, func(root chasm.Component) error {
-		for node := range root.Walk() {
+		for path, node := range root.Walk() {
+			if desc, ok := node.(Describable); ok {
+				descriptions = append(descriptions, ComponentDescription{
+					Path: path,
+					Data: desc.Describe(),
+				})
+			}
 		}
 		return nil
 	})
@@ -44,5 +63,7 @@ var describeOperation = chasm.NewSyncOperation("Describe", func(ctx context.Cont
 		return nil, err
 	}
 
-	return &DescribeResponse{}, nil
+	return &DescribeResponse{
+		Components: descriptions,
+	}, nil
 })

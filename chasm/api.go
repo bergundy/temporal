@@ -46,7 +46,7 @@ type Component interface {
 	setParent(Component)
 
 	Path() []string
-	Walk() iter.Seq[Component]
+	Walk() iter.Seq2[[]string, Component]
 
 	Child(keys ...string) Component
 	SpawnChild(key string, ctor func(component *ComponentBase) (Component, error)) error
@@ -63,6 +63,14 @@ func (*ComponentBase) Execution() *Execution {
 }
 
 func (*ComponentBase) Parent() Component {
+	panic("not implemented")
+}
+
+func (*ComponentBase) Path() []string {
+	panic("not implemented")
+}
+
+func (*ComponentBase) Walk() iter.Seq2[[]string, Component] {
 	panic("not implemented")
 }
 

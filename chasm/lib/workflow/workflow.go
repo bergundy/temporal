@@ -39,8 +39,8 @@ type Workflow struct {
 	state *State
 }
 
-func (w Workflow) activity(id string) activity.StateMachine {
-	return chasm.ChildComponent[activity.StateMachine]("activities", id)
+func (w Workflow) activity(id string) activity.Activity {
+	return chasm.ChildComponent[activity.Activity]("activities", id)
 }
 
 type workflowDefinition struct {
