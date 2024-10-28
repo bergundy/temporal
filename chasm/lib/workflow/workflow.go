@@ -9,6 +9,7 @@ import (
 )
 
 type Library struct {
+	engine chasm.Engine
 }
 
 // Components implements chasm.Library.
@@ -21,9 +22,11 @@ func (Library) Tasks() (defs []chasm.RegisterableTaskDefinition) {
 	panic("unimplemented")
 }
 
-func (Library) Services() (defs []*nexus.Service) {
+func (l Library) Services() (defs []*nexus.Service) {
 	service := nexus.NewService("workflow")
-	_ = service.Register(startOperation)
+	_ = service.Register(&executeOperation{
+		engine: l.engine,
+	})
 	defs = append(defs, service)
 	return
 }
@@ -63,28 +66,60 @@ func (*workflowDefinition) StorageType() chasm.StorageType {
 }
 
 // This will have codegen.
-type StartRequest struct {
+type ExecuteRequest struct {
 	NamespaceID, ID string
 }
 
-type StartResponse struct {
+type ExecuteResponse struct {
 }
 
-var startOperation = chasm.NewSyncOperation("Start", func(ctx context.Context, engine chasm.Engine, request *StartRequest, options nexus.StartOperationOptions) (*StartResponse, error) {
+type executeOperation struct {
+	nexus.UnimplementedOperation[*ExecuteRequest, *ExecuteResponse]
+
+	engine chasm.Engine
+}
+
+// Cancel implements nexus.Operation.
+func (*executeOperation) Cancel(context.Context, string, nexus.CancelOperationOptions) error {
+	panic("unimplemented")
+}
+
+// GetInfo implements nexus.Operation.
+func (*executeOperation) GetInfo(context.Context, string, nexus.GetOperationInfoOptions) (*nexus.OperationInfo, error) {
+	panic("unimplemented")
+}
+
+// GetResult implements nexus.Operation.
+func (*executeOperation) GetResult(context.Context, string, nexus.GetOperationResultOptions) (*ExecuteResponse, error) {
+	panic("unimplemented")
+}
+
+// Name implements nexus.Operation.
+func (*executeOperation) Name() string {
+	return "Execute"
+}
+
+// Start implements nexus.Operation.
+func (o *executeOperation) Start(ctx context.Context, request *ExecuteRequest, opts nexus.StartOperationOptions) (nexus.HandlerStartOperationResult[*ExecuteResponse], error) {
 	key := chasm.ExecutionKey{NamespaceID: request.NamespaceID, ExecutionID: request.ID}
-	err := engine.CreateExecution(ctx, key, func(base *chasm.ComponentBase) (chasm.Component, error) {
-		sm := Workflow{
+	err := o.engine.CreateExecution(ctx, key, func(base *chasm.ComponentBase) (chasm.Component, error) {
+		// TODO: Attach callback state machines from options.
+		w := Workflow{
 			base,
 			&State{},
 		}
-		return sm, nil
+		// TODO: Add workflow task...
+		return w, nil
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	return &StartResponse{}, nil
-})
+	// TODO: How can this return run ID and first workflow task?
+	return &nexus.HandlerStartOperationResultAsync{
+		OperationID: "TODO",
+	}, nil
+}
 
 // This will have codegen.
 type CompleteTaskRequest struct {
@@ -95,8 +130,8 @@ type CompleteTaskResponse struct {
 }
 
 var completeTaskOperation = chasm.NewSyncOperation("CompleteTask", func(ctx context.Context, engine chasm.Engine, request *CompleteTaskRequest, options nexus.StartOperationOptions) (*CompleteTaskResponse, error) {
-	err := chasm.UpdateComponent(ctx, engine, request.Ref, func(sm Workflow) error {
-		return sm.Child("activities").SpawnChild("some-id", activity.NewStateMachine)
+	err := chasm.UpdateComponent(ctx, engine, request.Ref, func(w Workflow) error {
+		return w.Child("activities").SpawnChild("some-id", activity.NewStateMachine)
 	})
 	if err != nil {
 		return nil, err
