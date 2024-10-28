@@ -58,6 +58,10 @@ func (*workflowDefinition) TypeName() string {
 	panic("unimplemented")
 }
 
+func (*workflowDefinition) StorageType() chasm.StorageType {
+	return chasm.StorageTypePersistent
+}
+
 // This will have codegen.
 type StartRequest struct {
 	NamespaceID, ID string

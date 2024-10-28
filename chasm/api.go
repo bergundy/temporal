@@ -98,8 +98,16 @@ func (*ComponentBase) AddTask(Task) {
 	panic("not implemented")
 }
 
+type StorageType int
+
+const (
+	StorageTypeEphemeralLRU = StorageType(iota)
+	StorageTypePersistent
+)
+
 type ComponentDefinition[T Component] interface {
 	TypeName() string
+	StorageType() StorageType
 	Serialize(component T) ([]byte, error)
 	Deserialize(data []byte, base *ComponentBase) (T, error)
 }

@@ -14,7 +14,7 @@ type Library struct {
 
 // Components implements chasm.Library.
 func (Library) Components() (defs []chasm.RegisterableComponentDefinition) {
-	defs = append(defs, chasm.NewRegisterableComponentDefinition(&activityDefintion{}))
+	defs = append(defs, chasm.NewRegisterableComponentDefinition(&activityDefinition{}))
 	return
 }
 
@@ -61,19 +61,23 @@ func NewStateMachine(base *chasm.ComponentBase) (chasm.Component, error) {
 	return sm, nil
 }
 
-type activityDefintion struct {
+type activityDefinition struct {
 }
 
-func (*activityDefintion) Deserialize(data []byte, base *chasm.ComponentBase) (Activity, error) {
+func (*activityDefinition) Deserialize(data []byte, base *chasm.ComponentBase) (Activity, error) {
 	panic("unimplemented")
 }
 
-func (*activityDefintion) Serialize(component Activity) ([]byte, error) {
+func (*activityDefinition) Serialize(component Activity) ([]byte, error) {
 	panic("unimplemented")
 }
 
-func (*activityDefintion) TypeName() string {
+func (*activityDefinition) TypeName() string {
 	panic("unimplemented")
+}
+
+func (*activityDefinition) StorageType() chasm.StorageType {
+	return chasm.StorageTypePersistent
 }
 
 type ScheduleTask struct{}
