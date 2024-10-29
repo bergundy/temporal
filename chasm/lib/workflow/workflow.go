@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/nexus-rpc/sdk-go/nexus"
+	commonpb "go.temporal.io/api/common/v1"
 	"go.temporal.io/server/chasm"
 	"go.temporal.io/server/chasm/lib/activity"
 )
@@ -37,13 +38,18 @@ var _ chasm.Library = Library{}
 type State struct {
 }
 
+type Memo struct {
+	*chasm.ComponentBase
+
+	Payload *commonpb.Payload
+}
+
 type Workflow struct {
 	*chasm.ComponentBase
 	state *State
-}
 
-func (w Workflow) activity(id string) activity.Activity {
-	return chasm.ChildComponent[activity.Activity]("activities", id)
+	Memo       Memo                                   `chasm-key:"memo"`
+	Activities *chasm.ComponentMap[activity.Activity] `chasm-key:"activities"`
 }
 
 type workflowDefinition struct {
@@ -105,8 +111,8 @@ func (o *executeOperation) Start(ctx context.Context, request *ExecuteRequest, o
 	err := o.engine.CreateExecution(ctx, key, func(base *chasm.ComponentBase) (chasm.Component, error) {
 		// TODO: Attach callback state machines from options.
 		w := Workflow{
-			base,
-			&State{},
+			ComponentBase: base,
+			state:         &State{},
 		}
 		// TODO: Add workflow task...
 		return w, nil
@@ -131,7 +137,7 @@ type CompleteTaskResponse struct {
 
 var completeTaskOperation = chasm.NewSyncOperation("CompleteTask", func(ctx context.Context, engine chasm.Engine, request *CompleteTaskRequest, options nexus.StartOperationOptions) (*CompleteTaskResponse, error) {
 	err := chasm.UpdateComponent(ctx, engine, request.Ref, func(w Workflow) error {
-		return w.Child("activities").SpawnChild("some-id", activity.NewStateMachine)
+		return w.Activities.Spawn("some-id", activity.NewActivity)
 	})
 	if err != nil {
 		return nil, err

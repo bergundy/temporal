@@ -50,7 +50,7 @@ type Activity struct {
 	state *State
 }
 
-func NewStateMachine(base *chasm.ComponentBase) (chasm.Component, error) {
+func NewActivity(base *chasm.ComponentBase) (Activity, error) {
 	sm := Activity{
 		base,
 		&State{
@@ -168,7 +168,7 @@ type StartResponse struct {
 
 var startOperation = chasm.NewSyncOperation("Start", func(ctx context.Context, engine chasm.Engine, request *StartRequest, options nexus.StartOperationOptions) (*StartResponse, error) {
 	key := chasm.ExecutionKey{NamespaceID: request.NamespaceID, ExecutionID: request.ID}
-	err := engine.CreateExecution(ctx, key, NewStateMachine)
+	err := engine.CreateExecution(ctx, key, NewActivity)
 	if err != nil {
 		return nil, err
 	}

@@ -442,12 +442,17 @@ func handleNonRetryableStartOperationError(env hsm.Environment, node *hsm.Node, 
 		}
 	})
 
-	return TransitionFailed.Apply(operation, EventFailed{
+	out, err := TransitionFailed.Apply(operation, EventFailed{
 		Time:             env.Now(),
 		Attributes:       attrs,
 		CompletionSource: CompletionSourceResponse,
 		Node:             node,
 	})
+	if err != nil {
+		return hsm.TransitionOutput{}, err
+	}
+	node.Parent().DeleteChild(node.Path())
+	return out, nil
 }
 
 func (e taskExecutor) executeBackoffTask(env hsm.Environment, node *hsm.Node, task BackoffTask) error {

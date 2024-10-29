@@ -98,6 +98,24 @@ func (*ComponentBase) AddTask(Task) {
 	panic("not implemented")
 }
 
+type ComponentMap[T Component] struct {
+	inner *ComponentBase
+}
+
+func (c *ComponentMap[T]) Get(key string) T {
+	return ChildComponent[T](c.inner, key)
+}
+
+func (c *ComponentMap[T]) Spawn(key string, ctor func(base *ComponentBase) (T, error)) error {
+	return c.inner.SpawnChild(key, func(base *ComponentBase) (Component, error) {
+		c, err := ctor(base)
+		if err != nil {
+			return nil, err
+		}
+		return c, nil
+	})
+}
+
 type StorageType int
 
 const (
@@ -161,7 +179,7 @@ type Engine interface {
 	ReadComponent(ctx context.Context, ref Ref, ctor func(root Component) error) error
 }
 
-func ChildComponent[T Component](path ...string) T {
+func ChildComponent[T Component](parent Component, path ...string) T {
 	panic("not implemented")
 }
 
