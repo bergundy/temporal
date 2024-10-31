@@ -1,9 +1,6 @@
 package activity
 
 import (
-	"context"
-	"time"
-
 	"github.com/nexus-rpc/sdk-go/nexus"
 	"go.temporal.io/server/api/matchingservice/v1"
 	"go.temporal.io/server/chasm"
@@ -13,13 +10,13 @@ type Library struct {
 }
 
 // Components implements chasm.Library.
-func (Library) Components() (defs []chasm.RegisterableComponentDefinition) {
-	defs = append(defs, chasm.NewRegisterableComponentDefinition(&activityDefinition{}))
+func (Library) Components() (defs []chasm.ComponentType) {
+	defs = append(defs, chasm.NewComponentType[Activity](&activityOptions{}))
 	return
 }
 
-func (Library) Tasks() (defs []chasm.RegisterableTaskDefinition) {
-	defs = append(defs, chasm.NewRegisterableTaskDefinition(&ScheduleTaskDefinition{}))
+func (Library) Tasks() (defs []chasm.TaskType) {
+	defs = append(defs, chasm.NewTaskType[ScheduleTask](&scheduleTaskOptions{}))
 	return
 }
 
@@ -46,44 +43,29 @@ type State struct {
 }
 
 type Activity struct {
-	*chasm.ComponentBase
-	state *State
+	State *State
 }
 
-func NewActivity(base *chasm.ComponentBase) (Activity, error) {
-	sm := Activity{
-		base,
-		&State{
-			Status: StatusScheduled,
-		},
+func InitActivity(ctx chasm.WriteContext, activity Activity, req *StartRequest) error {
+	activity.State = &State{
+		Status: StatusScheduled,
 	}
-	sm.AddTask(ScheduleTask{})
-	return sm, nil
+	return nil
 }
 
-type activityDefinition struct {
+type activityOptions struct {
 }
 
-func (*activityDefinition) Deserialize(data []byte, base *chasm.ComponentBase) (Activity, error) {
-	panic("unimplemented")
-}
-
-func (*activityDefinition) Serialize(component Activity) ([]byte, error) {
-	panic("unimplemented")
-}
-
-func (*activityDefinition) TypeName() string {
-	panic("unimplemented")
-}
-
-func (*activityDefinition) StorageType() chasm.StorageType {
-	return chasm.StorageTypePersistent
+func (*activityOptions) Storage() chasm.StorageOptions {
+	return chasm.StorageOptionsPersistent{}
 }
 
 type ScheduleTask struct{}
 
-func (ScheduleTask) Deadline() time.Time {
-	return chasm.NoDeadline
+func (ScheduleTask) Attributes() chasm.TaskAttributes {
+	return chasm.TaskAttributes{
+		Deadline: chasm.Immediate,
+	}
 }
 
 func (ScheduleTask) Destination() string {
@@ -92,27 +74,23 @@ func (ScheduleTask) Destination() string {
 
 var _ chasm.Task = ScheduleTask{}
 
-type ScheduleTaskDefinition struct {
+type scheduleTaskOptions struct {
 	matchingClient matchingservice.MatchingServiceClient
 }
 
 // Type implements chasm.Task.
-func (*ScheduleTaskDefinition) TypeName() string {
-	return "schedule"
-}
-
-func (*ScheduleTaskDefinition) Validate(ref chasm.Ref, comp chasm.Component, task ScheduleTask) error {
-	if comp.Execution().RunState != chasm.RunStateRunning {
+func (*scheduleTaskOptions) Validate(ctx chasm.ReadContext, comp chasm.Component, task ScheduleTask) error {
+	if ctx.Instance().State != chasm.InstanceStateRunning {
 		return chasm.ErrStaleReference
 	}
-	if comp.(Activity).state.Status != StatusScheduled {
+	if comp.(Activity).State.Status != StatusScheduled {
 		return chasm.ErrStaleReference
 	}
 	return nil
 }
 
-func (d *ScheduleTaskDefinition) Execute(ctx context.Context, engine chasm.Engine, ref chasm.Ref, task ScheduleTask) error {
-	request, err := d.loadRequest(ctx, engine, ref, task)
+func (d *scheduleTaskOptions) Execute(ctx chasm.EngineContext, ref chasm.Ref, task ScheduleTask) error {
+	request, err := d.loadRequest(ctx, ref, task)
 	if err != nil {
 		return err
 	}
@@ -120,21 +98,13 @@ func (d *ScheduleTaskDefinition) Execute(ctx context.Context, engine chasm.Engin
 	return err
 }
 
-func (*ScheduleTaskDefinition) loadRequest(ctx context.Context, engine chasm.Engine, ref chasm.Ref, task ScheduleTask) (request *matchingservice.AddActivityTaskRequest, err error) {
-	err = chasm.ReadComponent(ctx, engine, ref, func(root Activity) error {
+func (*scheduleTaskOptions) loadRequest(ctx chasm.EngineContext, ref chasm.Ref, task ScheduleTask) (request *matchingservice.AddActivityTaskRequest, err error) {
+	err = chasm.ReadComponent(ctx, ref, func(root Activity) error {
 		// TODO: Populate with data from state machine.
 		request = &matchingservice.AddActivityTaskRequest{}
 		return nil
 	})
 	return
-}
-
-func (*ScheduleTaskDefinition) Serialize(task ScheduleTask) ([]byte, error) {
-	return nil, nil
-}
-
-func (*ScheduleTaskDefinition) Deserialize(data []byte, attrs chasm.TaskAttributes) (ScheduleTask, error) {
-	return ScheduleTask{}, nil
 }
 
 // This will have codegen.
@@ -145,10 +115,10 @@ type RecordTaskStartedRequest struct {
 type RecordTaskStartedResponse struct {
 }
 
-var recordTaskStartedOperation = chasm.NewSyncOperation[*RecordTaskStartedRequest, *RecordTaskStartedResponse]("RecordTaskStarted", func(ctx context.Context, engine chasm.Engine, request *RecordTaskStartedRequest, options nexus.StartOperationOptions) (*RecordTaskStartedResponse, error) {
-	err := chasm.UpdateComponent(ctx, engine, request.Ref, func(sm Activity) error {
+var recordTaskStartedOperation = chasm.NewSyncOperation("RecordTaskStarted", func(ctx chasm.EngineContext, request *RecordTaskStartedRequest, options nexus.StartOperationOptions) (*RecordTaskStartedResponse, error) {
+	err := chasm.UpdateComponent(ctx, request.Ref, func(sm Activity) error {
 		// Transition only from Scheduled and other validations.
-		sm.state.Status = StatusStarted
+		sm.State.Status = StatusStarted
 		return nil
 	})
 	if err != nil {
@@ -166,9 +136,9 @@ type StartRequest struct {
 type StartResponse struct {
 }
 
-var startOperation = chasm.NewSyncOperation("Start", func(ctx context.Context, engine chasm.Engine, request *StartRequest, options nexus.StartOperationOptions) (*StartResponse, error) {
-	key := chasm.ExecutionKey{NamespaceID: request.NamespaceID, ExecutionID: request.ID}
-	err := engine.CreateExecution(ctx, key, NewActivity)
+var startOperation = chasm.NewSyncOperation("Start", func(ctx chasm.EngineContext, request *StartRequest, options nexus.StartOperationOptions) (*StartResponse, error) {
+	key := chasm.InstanceKey{NamespaceID: request.NamespaceID, BusinessID: request.ID}
+	err := chasm.CreateExecution(ctx, key, request, InitActivity)
 	if err != nil {
 		return nil, err
 	}

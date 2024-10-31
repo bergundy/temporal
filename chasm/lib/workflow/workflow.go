@@ -1,8 +1,6 @@
 package workflow
 
 import (
-	"context"
-
 	"github.com/nexus-rpc/sdk-go/nexus"
 	commonpb "go.temporal.io/api/common/v1"
 	"go.temporal.io/server/chasm"
@@ -10,24 +8,21 @@ import (
 )
 
 type Library struct {
-	engine chasm.Engine
 }
 
 // Components implements chasm.Library.
-func (Library) Components() (defs []chasm.RegisterableComponentDefinition) {
-	defs = append(defs, chasm.NewRegisterableComponentDefinition(&workflowDefinition{}))
+func (Library) Components() (defs []chasm.ComponentType) {
+	defs = append(defs, chasm.NewComponentType[Workflow](&workflowOptions{}))
 	return
 }
 
-func (Library) Tasks() (defs []chasm.RegisterableTaskDefinition) {
+func (Library) Tasks() (defs []chasm.TaskType) {
 	panic("unimplemented")
 }
 
 func (l Library) Services() (defs []*nexus.Service) {
 	service := nexus.NewService("workflow")
-	_ = service.Register(&executeOperation{
-		engine: l.engine,
-	})
+	_ = service.Register(&executeOperation{})
 	defs = append(defs, service)
 	return
 }
@@ -39,36 +34,34 @@ type State struct {
 }
 
 type Memo struct {
-	*chasm.ComponentBase
-
-	Payload *commonpb.Payload
+	State *commonpb.Payload
 }
 
 type Workflow struct {
-	*chasm.ComponentBase
-	state *State
+	State *State // proto.Message
 
-	Memo       Memo                                   `chasm-key:"memo"`
-	Activities *chasm.ComponentMap[activity.Activity] `chasm-key:"activities"`
+	Memo       *chasm.ComponentHandle[Memo]
+	Activities *chasm.ComponentMap[activity.Activity]
 }
 
-type workflowDefinition struct {
+type workflowOptions struct {
 }
 
-func (*workflowDefinition) Deserialize(data []byte, base *chasm.ComponentBase) (Workflow, error) {
+// not required.
+func (*workflowOptions) TypeName() string {
 	panic("unimplemented")
 }
 
-func (*workflowDefinition) Serialize(component Workflow) ([]byte, error) {
-	panic("unimplemented")
+func (*workflowOptions) Storage() chasm.StorageOptions {
+	return chasm.StorageOptionsPersistent{}
 }
-
-func (*workflowDefinition) TypeName() string {
-	panic("unimplemented")
-}
-
-func (*workflowDefinition) StorageType() chasm.StorageType {
-	return chasm.StorageTypePersistent
+func InitWorkflow(ctx chasm.WriteContext, w Workflow, request *ExecuteRequest) error {
+	// TODO: Attach callback state machines from options.
+	w.State = &State{}
+	memo := w.Memo.SetEmpty()
+	memo.State = nil // TODO
+	// TODO: Add workflow task...
+	return nil
 }
 
 // This will have codegen.
@@ -81,22 +74,17 @@ type ExecuteResponse struct {
 
 type executeOperation struct {
 	nexus.UnimplementedOperation[*ExecuteRequest, *ExecuteResponse]
-
-	engine chasm.Engine
 }
 
-// Cancel implements nexus.Operation.
-func (*executeOperation) Cancel(context.Context, string, nexus.CancelOperationOptions) error {
+func (*executeOperation) Cancel(chasm.EngineContext, string, nexus.CancelOperationOptions) error {
 	panic("unimplemented")
 }
 
-// GetInfo implements nexus.Operation.
-func (*executeOperation) GetInfo(context.Context, string, nexus.GetOperationInfoOptions) (*nexus.OperationInfo, error) {
+func (*executeOperation) GetInfo(chasm.EngineContext, string, nexus.GetOperationInfoOptions) (*nexus.OperationInfo, error) {
 	panic("unimplemented")
 }
 
-// GetResult implements nexus.Operation.
-func (*executeOperation) GetResult(context.Context, string, nexus.GetOperationResultOptions) (*ExecuteResponse, error) {
+func (*executeOperation) GetResult(chasm.EngineContext, string, nexus.GetOperationResultOptions) (*ExecuteResponse, error) {
 	panic("unimplemented")
 }
 
@@ -106,17 +94,9 @@ func (*executeOperation) Name() string {
 }
 
 // Start implements nexus.Operation.
-func (o *executeOperation) Start(ctx context.Context, request *ExecuteRequest, opts nexus.StartOperationOptions) (nexus.HandlerStartOperationResult[*ExecuteResponse], error) {
-	key := chasm.ExecutionKey{NamespaceID: request.NamespaceID, ExecutionID: request.ID}
-	err := o.engine.CreateExecution(ctx, key, func(base *chasm.ComponentBase) (chasm.Component, error) {
-		// TODO: Attach callback state machines from options.
-		w := Workflow{
-			ComponentBase: base,
-			state:         &State{},
-		}
-		// TODO: Add workflow task...
-		return w, nil
-	})
+func (o *executeOperation) Start(ctx chasm.EngineContext, request *ExecuteRequest, opts nexus.StartOperationOptions) (nexus.HandlerStartOperationResult[*ExecuteResponse], error) {
+	key := chasm.InstanceKey{NamespaceID: request.NamespaceID, BusinessID: request.ID}
+	err := chasm.CreateExecution(ctx, key, request, InitWorkflow)
 	if err != nil {
 		return nil, err
 	}
@@ -135,10 +115,12 @@ type CompleteTaskRequest struct {
 type CompleteTaskResponse struct {
 }
 
-var completeTaskOperation = chasm.NewSyncOperation("CompleteTask", func(ctx context.Context, engine chasm.Engine, request *CompleteTaskRequest, options nexus.StartOperationOptions) (*CompleteTaskResponse, error) {
-	err := chasm.UpdateComponent(ctx, engine, request.Ref, func(w Workflow) error {
-		return w.Activities.Spawn("some-id", activity.NewActivity)
+var completeTaskOperation = chasm.NewSyncOperation("CompleteTask", func(ctx chasm.EngineContext, request *CompleteTaskRequest, options nexus.StartOperationOptions) (*CompleteTaskResponse, error) {
+	err := chasm.UpdateComponent(ctx, request.Ref, func(ctx chasm.WriteContext, w Workflow) error {
+		act := w.Activities.AddEmpty("some-id")
+		return activity.InitActivity(ctx, act, &activity.StartRequest{})
 	})
+
 	if err != nil {
 		return nil, err
 	}

@@ -3,8 +3,6 @@ package chasm
 import (
 	"context"
 	"errors"
-	"fmt"
-	"iter"
 	"reflect"
 	"time"
 
@@ -12,277 +10,248 @@ import (
 )
 
 // Names in this API are not final, structure is up for debate.
-// Alternatives for Execution: StateMachine, Entity, Process
+// Alternatives for Instance: StateMachine, Entity, Process, Execution.
 
-type ExecutionKey struct {
-	// Not sure if we need FirstExecutionRunID here, it may not always be applicable...
-	// Is RunID ever optional?
-	NamespaceID, ExecutionID, RunID, FirstExecutionRunID string
+type InstanceKey struct {
+	NamespaceID, BusinessID, InstanceID string
 }
 
 // This will be a proto enum.
-type ExecutionState int
+type InstanceState int
 
 const (
-	RunStateRunning = ExecutionState(iota)
-	RunStateClosed
-	RunStateZombie
+	InstanceStateRunning = InstanceState(iota)
+	InstanceStateClosed
+	InstanceStateZombie // hidden?
 )
 
-// If everything is an Execution, it should have these fields (and some others).
-type Execution struct {
-	ExecutionKey
+// If everything is an Instance, it should have these fields (and some others).
+type Instance struct {
+	InstanceKey
 
-	// Could also be a component.
-	RunState  ExecutionState
+	State     InstanceState
 	StartTime time.Time
 	CloseTime time.Time
 }
 
-type Component interface {
-	Execution() *Execution
+type Component any
 
-	Parent() Component
-	setParent(Component)
-
-	Path() []string
-	Walk() iter.Seq2[[]string, Component]
-
-	Child(keys ...string) Component
-	SpawnChild(key string, ctor func(component *ComponentBase) (Component, error)) error
-	DeleteChild(key string) bool
-
-	AddTask(Task)
+type ReadContext interface {
+	context.Context
+	Instance() *Instance
+	Child(component Component, path ...string) (Component, bool)
 }
 
-type ComponentBase struct {
+type WriteContext interface {
+	ReadContext
+	AddTask(component Component, task Task)
+	addChild(key string, component Component)
 }
 
-func (*ComponentBase) Execution() *Execution {
-	panic("not implemented")
-}
-
-func (*ComponentBase) Parent() Component {
-	panic("not implemented")
-}
-
-func (*ComponentBase) Path() []string {
-	panic("not implemented")
-}
-
-func (*ComponentBase) Walk() iter.Seq2[[]string, Component] {
-	panic("not implemented")
-}
-
-func (*ComponentBase) setParent(comp Component) {
-	panic("not implemented")
-}
-
-func (*ComponentBase) Child(keys ...string) Component {
-	panic("not implemented")
-}
-
-func (*ComponentBase) SpawnChild(key string, ctor func(component *ComponentBase) (Component, error)) error {
-	panic("not implemented")
-}
-
-// func (*BaseComponent) SetChild(key string, comp Component2) {
-// 	panic("not implemented")
-// }
-
-func (*ComponentBase) DeleteChild(key string) bool {
-	panic("not implemented")
-}
-
-func (*ComponentBase) AddTask(Task) {
-	panic("not implemented")
+func ChildComponent[T Component](ctx ReadContext, comp Component, key ...string) (T, bool) {
+	c, ok := ctx.Child(comp, key...)
+	if !ok {
+		var zero T
+		return zero, false
+	}
+	return c.(T), true
 }
 
 type ComponentMap[T Component] struct {
-	inner *ComponentBase
+	parent Component
+	key    string
+	rctx   ReadContext
+	wctx   WriteContext
 }
 
-func (c *ComponentMap[T]) Get(key string) T {
-	return ChildComponent[T](c.inner, key)
+func (c *ComponentMap[T]) Get(key string) (T, bool) {
+	return ChildComponent[T](c.rctx, c.parent, c.key, key)
 }
 
-func (c *ComponentMap[T]) Spawn(key string, ctor func(base *ComponentBase) (T, error)) error {
-	return c.inner.SpawnChild(key, func(base *ComponentBase) (Component, error) {
-		c, err := ctor(base)
-		if err != nil {
-			return nil, err
-		}
-		return c, nil
-	})
+func (c *ComponentMap[T]) AddEmpty(key string) T {
+	// TODO
 }
 
-type StorageType int
+// func SpawnMapChild[T Component, I any](c *ComponentMap[T], key string, input I, init func(ctx WriteContext, instance T, input I) error) error {
+// 	// TODO: c.wctx.addChild(key, comp)
+// 	panic("todo")
+// }
 
-const (
-	StorageTypeEphemeralLRU = StorageType(iota)
-	StorageTypePersistent
-)
+// func (c *ComponentMap[T]) Spawn(key string, input any, init func(ctx WriteContext, instance T, input any) error) error {
+// 	// TODO: c.wctx.addChild(key, comp)
+// 	panic("todo")
+// }
 
-type ComponentDefinition[T Component] interface {
-	TypeName() string
-	StorageType() StorageType
-	Serialize(component T) ([]byte, error)
-	Deserialize(data []byte, base *ComponentBase) (T, error)
+type ComponentHandle[T Component] struct {
+	parent Component
+	key    string
+	rctx   ReadContext
+	wctx   WriteContext
 }
 
-type RegisterableComponentDefinition interface {
-	TypeName() string
-	ReflectType() reflect.Type
-	mustImplementRegisterableComponentDefinition()
+func (c *ComponentHandle[T]) Get() (T, bool) {
+	return ChildComponent[T](c.rctx, c.parent, c.key)
 }
 
-type registerableComponentDefinition[T Component] struct {
-	ComponentDefinition[T]
+func (c *ComponentHandle[T]) SetEmpty() T {
+	panic("todo")
+}
+
+// func SpawnChild[T Component, I any](c *ComponentHandle[T], input I, init func(ctx WriteContext, instance T, input I) error) error {
+// 	// TODO: c.wctx.addChild(key, comp)
+// 	panic("todo")
+// }
+
+type StorageOptions interface {
+	mustImplmenentStorageOptions()
+}
+
+type StorageOptionsPersistent struct {
+}
+
+func (StorageOptionsPersistent) mustImplmenentStorageOptions() {}
+
+type StorageOptionsEphemeralLRU struct {
+}
+
+func (StorageOptionsEphemeralLRU) mustImplmenentStorageOptions() {}
+
+type ComponentOptions[T Component] interface {
+	Storage() StorageOptions
+}
+
+type untypedComponentOptions struct {
+}
+
+func newUntypedComponentOptions[T Component](ComponentOptions[T]) untypedComponentOptions {
+	return untypedComponentOptions{} // TODO
+}
+
+type ComponentType struct {
+	untypedComponentOptions
+
 	typ reflect.Type
 }
 
-func (registerableComponentDefinition[T]) mustImplementRegisterableComponentDefinition() {}
-
-func (r registerableComponentDefinition[T]) ReflectType() reflect.Type {
-	return r.typ
-}
-
-func (r registerableComponentDefinition[T]) Serialize(component Component) ([]byte, error) {
-	t, ok := component.(T)
-	if !ok {
-		return nil, fmt.Errorf("TODO")
-	}
-	return r.ComponentDefinition.Serialize(t)
-}
-
-func (r registerableComponentDefinition[T]) Deserialize(data []byte, base *ComponentBase) (Component, error) {
-	return r.ComponentDefinition.Deserialize(data, base)
-}
-
-func NewRegisterableComponentDefinition[T Component](def ComponentDefinition[T]) RegisterableComponentDefinition {
+func NewComponentType[T Component](opts ComponentOptions[T]) ComponentType {
 	var t [0]T
 	typ := reflect.TypeOf(t).Elem()
-	return registerableComponentDefinition[T]{
-		ComponentDefinition: def,
-		typ:                 typ,
-	}
+
+	return ComponentType{newUntypedComponentOptions[T](opts), typ}
 }
 
-type Engine interface {
-	CreateExecution(ctx context.Context, key ExecutionKey, ctor func(root *ComponentBase) (Component, error)) error
-
-	// Do we just want functions to access components directly?
-	UpdateExecution(ctx context.Context, key ExecutionKey, token ConsistencyToken, ctor func(root Component) error) error
-	ReadExecution(ctx context.Context, key ExecutionKey, token ConsistencyToken, ctor func(root Component) error) error
-
-	UpdateComponent(ctx context.Context, ref Ref, ctor func(root Component) error) error
-	ReadComponent(ctx context.Context, ref Ref, ctor func(root Component) error) error
+func (c ComponentType) ReflectType() reflect.Type {
+	return c.typ
 }
 
-func ChildComponent[T Component](parent Component, path ...string) T {
-	panic("not implemented")
-}
-
-func UpdateExecution[T Component](context.Context, ExecutionKey, ConsistencyToken, func(root T) error) error {
-	panic("not implemented")
-}
-
-func UpdateComponent[T Component](ctx context.Context, engine Engine, ref Ref, fn func(comp T) error) error {
-	panic("not implemented")
-}
-
-func ReadComponent[T Component](ctx context.Context, engine Engine, ref Ref, fn func(comp T) error) error {
-	panic("not implemented")
-}
-
-var NoDeadline = time.Time{}
+var Immediate = time.Time{}
 
 type Task interface {
-	Deadline() time.Time
+	Attributes() TaskAttributes
+}
+
+type TaskAttributes struct {
+	Deadline time.Time
 	// This approach works for 99% of the use cases we have in mind.
-	Destination() string
+	Destination string
 	// If we need more flexibility, e.g. tiered storage and visibility, we can potentially make this more generic:
 	// Queue() tasks.Category
 	// Tags() map[string]string
 }
 
-type TaskAttributes struct {
-	Deadline    time.Time
-	Destination string
-}
-
 type ConsistencyToken []byte
 
 type Ref struct {
-	ExecutionKey     ExecutionKey
+	ExecutionKey     InstanceKey
 	ComponentPath    []string
 	ConsistencyToken ConsistencyToken
+
+	// Optional. May be set for task executor.
+	// There are other ways to do this, TBD.
+	Validate func(ctx ReadContext, component Component) error
 }
 
 var ErrStaleReference = errors.New("stale reference")
 
-type TaskDefinition[T Task] interface {
-	// Task type that must be unique per task definition.
-	TypeName() string
-
-	Validate(ref Ref, component Component, task T) error
-	Execute(ctx context.Context, engine Engine, ref Ref, task T) error
-	Serialize(task T) ([]byte, error)
-	Deserialize(data []byte, attrs TaskAttributes) (T, error)
+type TaskOptions[T Task] interface {
+	Validate(ctx ReadContext, component Component, task T) error
+	Execute(ctx EngineContext, ref Ref, task T) error
 }
 
-type RegisterableTaskDefinition interface {
-	ReflectType() reflect.Type
-	TypeName() string
-	mustImplementRegisterableTaskDefinition()
+type untypedTaskOptions struct {
 }
 
-type registerableTaskDefinition[T Task] struct {
-	TaskDefinition[T]
+func newUntypedTaskOptions[T Task](opts TaskOptions[T]) untypedTaskOptions {
+	return untypedTaskOptions{} // TODO
+}
+
+type TaskType struct {
+	untypedTaskOptions
 	typ reflect.Type
 }
 
-func (r registerableTaskDefinition[T]) ReflectType() reflect.Type {
-	return r.typ
-}
-
-func (registerableTaskDefinition[T]) mustImplementRegisterableTaskDefinition() {}
-
-func (r registerableTaskDefinition[T]) Serialize(task Task) ([]byte, error) {
-	t, ok := task.(T)
-	if !ok {
-		return nil, fmt.Errorf("TODO")
-	}
-	return r.TaskDefinition.Serialize(t)
-}
-
-func (r registerableTaskDefinition[T]) Deserialize(data []byte, attrs TaskAttributes) (Task, error) {
-	return r.TaskDefinition.Deserialize(data, attrs)
-}
-
-func NewRegisterableTaskDefinition[T Task](def TaskDefinition[T]) RegisterableTaskDefinition {
+func NewTaskType[T Task](opts TaskOptions[T]) TaskType {
 	var t [0]T
 	typ := reflect.TypeOf(t).Elem()
-	return registerableTaskDefinition[T]{
-		TaskDefinition: def,
-		typ:            typ,
+	return TaskType{
+		untypedTaskOptions: newUntypedTaskOptions(opts),
+		typ:                typ,
 	}
+}
+
+func (t TaskType) ReflectType() reflect.Type {
+	return t.typ
 }
 
 type Library interface {
-	Components() []RegisterableComponentDefinition
-	Tasks() []RegisterableTaskDefinition
+	Components() []ComponentType
+	Tasks() []TaskType
 	Services() []*nexus.Service
+}
+
+type EngineContext interface {
+	context.Context
+
+	createExecution(key InstanceKey, ctor func(ctx WriteContext) (Component, error)) error
+	upsertExecution(key InstanceKey, token ConsistencyToken, ctor func(ctx WriteContext, root any) error) error
+
+	// Do we just want functions to access components directly?
+	updateExecution(key InstanceKey, token ConsistencyToken, ctor func(ctx WriteContext, root any) error) error
+	readExecution(key InstanceKey, token ConsistencyToken, ctor func(ctx ReadContext, root any) error) error
+
+	updateComponent(ref Ref, ctor func(ctx WriteContext, comp any) error) error
+	readComponent(ref Ref, ctor func(ctx ReadContext, comp any) error) error
+}
+
+func CreateExecution[T any, I any](ctx EngineContext, key InstanceKey, input I, init func(ctx WriteContext, root T, input I) error) error {
+	return ctx.createExecution(key, func(ctx WriteContext) (Component, error) {
+		var root T
+		// TODO: reflect magic...
+		err := init(ctx, root, input)
+		return root, err
+	})
+}
+
+func UpdateExecution[T any](context.Context, InstanceKey, ConsistencyToken, func(root T) error) error {
+	panic("not implemented")
+}
+
+func UpdateComponent[T any](ctx EngineContext, ref Ref, fn func(ctx WriteContext, comp T) error) error {
+	panic("not implemented")
+}
+
+func ReadComponent[T any](ctx EngineContext, ref Ref, fn func(ctx ReadContext, comp T) error) error {
+	panic("not implemented")
 }
 
 // Alternative:
 type Registry interface {
 }
 
-func RegisterComponent[T Component](reg Registry, def ComponentDefinition[T]) {
+func RegisterComponent[T Component](reg Registry, opts ComponentOptions[T]) {
 }
 
-func RegisterTask[T Task](reg Registry, def TaskDefinition[T]) {
+func RegisterTask[T Task](reg Registry, opts TaskOptions[T]) {
 }
 
 func RegisterService(reg Registry, service *nexus.Service) {
@@ -291,12 +260,12 @@ func RegisterService(reg Registry, service *nexus.Service) {
 type syncOperation[I, O any] struct {
 	nexus.UnimplementedOperation[I, O]
 
-	Handler func(context.Context, Engine, I, nexus.StartOperationOptions) (O, error)
+	Handler func(EngineContext, I, nexus.StartOperationOptions) (O, error)
 	name    string
 }
 
 // NewSyncOperation is a helper for creating a synchronous-only [Operation] from a given name and handler function.
-func NewSyncOperation[I, O any](name string, handler func(context.Context, Engine, I, nexus.StartOperationOptions) (O, error)) nexus.Operation[I, O] {
+func NewSyncOperation[I, O any](name string, handler func(EngineContext, I, nexus.StartOperationOptions) (O, error)) nexus.Operation[I, O] {
 	return &syncOperation[I, O]{
 		name:    name,
 		Handler: handler,
@@ -310,7 +279,7 @@ func (h *syncOperation[I, O]) Name() string {
 
 // Start implements Operation.
 func (h *syncOperation[I, O]) Start(ctx context.Context, input I, options nexus.StartOperationOptions) (nexus.HandlerStartOperationResult[O], error) {
-	o, err := h.Handler(ctx, nil, input, options)
+	o, err := h.Handler(ctx.(EngineContext), input, options)
 	if err != nil {
 		return nil, err
 	}
