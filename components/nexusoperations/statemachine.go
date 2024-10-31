@@ -171,19 +171,16 @@ func (o Operation) creationTasks(node *hsm.Node) ([]hsm.Task, error) {
 	return nil, nil
 }
 
-func (o Operation) RegenerateTasks(prevData any, node *hsm.Node) ([]hsm.Task, error) {
-	tasks, err := o.transitionTasks()
+func (o Operation) RegenerateTasks(node *hsm.Node) ([]hsm.Task, error) {
+	transitionTasks, err := o.transitionTasks()
 	if err != nil {
 		return nil, err
 	}
-	if prevData == nil {
-		creationTasks, err := o.creationTasks(node)
-		if err != nil {
-			return nil, err
-		}
-		tasks = append(tasks, creationTasks...)
+	creationTasks, err := o.creationTasks(node)
+	if err != nil {
+		return nil, err
 	}
-	return tasks, nil
+	return append(transitionTasks, creationTasks...), nil
 }
 
 func (o Operation) output() (hsm.TransitionOutput, error) {
@@ -321,17 +318,6 @@ type EventFailed struct {
 	Node             *hsm.Node
 	Attributes       *historypb.NexusOperationFailedEventAttributes
 	CompletionSource CompletionSource
-}
-
-func (o Operation) Fail(event EventFailed) (hsm.TransitionOutput, error) {
-	out, err := TransitionFailed.Apply(o, event)
-	if err != nil {
-		return hsm.TransitionOutput{}, err
-	}
-	if o.DeleteOnCompletion {
-		event.Node.Parent.DeleteChild(event.node.Path())
-	}
-	return out, nil
 }
 
 var TransitionFailed = hsm.NewTransition(
@@ -589,7 +575,7 @@ func (c Cancelation) recordAttempt(ts time.Time) {
 	c.NexusOperationCancellationInfo.LastAttemptFailure = nil
 }
 
-func (c Cancelation) RegenerateTasks(_ any, node *hsm.Node) ([]hsm.Task, error) {
+func (c Cancelation) RegenerateTasks(node *hsm.Node) ([]hsm.Task, error) {
 	op, err := hsm.MachineData[Operation](node.Parent)
 	if err != nil {
 		return nil, err
@@ -605,7 +591,7 @@ func (c Cancelation) RegenerateTasks(_ any, node *hsm.Node) ([]hsm.Task, error) 
 }
 
 func (c Cancelation) output(node *hsm.Node) (hsm.TransitionOutput, error) {
-	tasks, err := c.RegenerateTasks(nil, node)
+	tasks, err := c.RegenerateTasks(node)
 	if err != nil {
 		return hsm.TransitionOutput{}, err
 	}
