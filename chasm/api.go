@@ -74,6 +74,11 @@ func (c *ComponentMap[T]) AddEmpty(key string) T {
 	panic("not implemented")
 }
 
+func (c *ComponentMap[T]) Set(key string, value T) {
+	// TODO
+	panic("not implemented")
+}
+
 // func SpawnMapChild[T Component, I any](c *ComponentMap[T], key string, input I, init func(ctx WriteContext, instance T, input I) error) error {
 // 	// TODO: c.wctx.addChild(key, comp)
 // 	panic("todo")
@@ -91,12 +96,25 @@ type ComponentHandle[T Component] struct {
 	wctx   WriteContext
 }
 
+func (c *ComponentHandle[T]) MustGet() T {
+	panic("todo")
+}
+
 func (c *ComponentHandle[T]) Get() (T, bool) {
 	return ChildComponent[T](c.rctx, c.parent, c.key)
 }
 
+func (c *ComponentHandle[T]) GetOrDefault() T {
+	panic("todo")
+}
+
 func (c *ComponentHandle[T]) SetEmpty() T {
 	panic("todo")
+}
+
+func (c *ComponentHandle[T]) Set(value T) {
+	// TODO
+	panic("not implemented")
 }
 
 // func SpawnChild[T Component, I any](c *ComponentHandle[T], input I, init func(ctx WriteContext, instance T, input I) error) error {
@@ -117,6 +135,11 @@ type StorageOptionsEphemeralLRU struct {
 }
 
 func (StorageOptionsEphemeralLRU) mustImplmenentStorageOptions() {}
+
+type StorageOptionsHistory struct {
+}
+
+func (StorageOptionsHistory) mustImplmenentStorageOptions() {}
 
 type ComponentOptions[T Component] interface {
 	Storage() StorageOptions

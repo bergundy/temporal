@@ -4,6 +4,7 @@ import (
 	"github.com/nexus-rpc/sdk-go/nexus"
 	"go.temporal.io/server/api/matchingservice/v1"
 	"go.temporal.io/server/chasm"
+	"go.temporal.io/server/chasm/lib/eventstore"
 )
 
 type Library struct {
@@ -44,12 +45,34 @@ type State struct {
 
 type Activity struct {
 	State *State
+
+	EventStore *chasm.ComponentHandle[eventstore.EventStore]
 }
 
-func InitActivity(ctx chasm.WriteContext, activity Activity, req *StartRequest) error {
+type ScheduledEvent struct {
+}
+
+func (ScheduledEvent) ID() int64 {
+	return 0
+}
+
+type InitActivityOptions struct {
+	EventStore eventstore.EventStore
+	Event      *ScheduledEvent
+}
+
+func InitActivity(ctx chasm.WriteContext, activity Activity, options *InitActivityOptions) error {
 	activity.State = &State{
 		Status: StatusScheduled,
 	}
+	var s eventstore.EventStore
+	if options.EventStore == nil {
+		s = options.EventStore
+	} else {
+		s = eventstore.EmbeddedEventStore{State: &struct{ Exclude []string }{Exclude: []string{"ActivityStartedEvent"}}}
+	}
+	activity.EventStore.Set(s)
+	s.Add(ctx, options.Event)
 	return nil
 }
 
@@ -119,6 +142,7 @@ var recordTaskStartedOperation = chasm.NewSyncOperation("RecordTaskStarted", fun
 	err := chasm.UpdateComponent(ctx, request.Ref, func(ctx chasm.WriteContext, activity Activity) error {
 		// Transition only from Scheduled and other validations.
 		activity.State.Status = StatusStarted
+		activity.EventStore.MustGet().Get(ctx, 0) // TODO: get by token.
 		return nil
 	})
 	if err != nil {
@@ -138,7 +162,10 @@ type StartResponse struct {
 
 var startOperation = chasm.NewSyncOperation("Start", func(ctx chasm.EngineContext, request *StartRequest, options nexus.StartOperationOptions) (*StartResponse, error) {
 	key := chasm.InstanceKey{NamespaceID: request.NamespaceID, BusinessID: request.ID}
-	err := chasm.CreateExecution(ctx, key, request, InitActivity)
+	initOpts := &InitActivityOptions{
+		Event: &ScheduledEvent{},
+	}
+	err := chasm.CreateExecution(ctx, key, initOpts, InitActivity)
 	if err != nil {
 		return nil, err
 	}

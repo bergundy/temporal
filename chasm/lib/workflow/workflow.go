@@ -5,6 +5,7 @@ import (
 	commonpb "go.temporal.io/api/common/v1"
 	"go.temporal.io/server/chasm"
 	"go.temporal.io/server/chasm/lib/activity"
+	"go.temporal.io/server/chasm/lib/eventstore"
 )
 
 type Library struct {
@@ -40,6 +41,7 @@ type Memo struct {
 type Workflow struct {
 	State *State // proto.Message
 
+	EventStore *chasm.ComponentHandle[eventstore.EventStore]
 	Memo       *chasm.ComponentHandle[Memo]
 	Activities *chasm.ComponentMap[activity.Activity]
 }
@@ -54,6 +56,28 @@ func (*workflowOptions) TypeName() string {
 
 func (*workflowOptions) Storage() chasm.StorageOptions {
 	return chasm.StorageOptionsPersistent{}
+}
+
+type EventStore struct {
+	State *struct{ Exclude []string }
+
+	Events *chasm.ComponentMap[eventstore.Event]
+}
+
+func (s EventStore) Add(ctx chasm.WriteContext, event eventstore.Event) {
+	// Here there'll be a type switch to record workflow events.
+	// TODO: not implemented.
+}
+
+func (s EventStore) Get(ctx chasm.ReadContext, id int64) eventstore.Event {
+	panic("todo")
+}
+
+type embeddedEventStoreOptions struct {
+}
+
+func (*embeddedEventStoreOptions) Storage() chasm.StorageOptions {
+	return chasm.StorageOptionsHistory{}
 }
 
 func InitWorkflow(ctx chasm.WriteContext, w Workflow, request *ExecuteRequest) error {
@@ -119,7 +143,12 @@ type CompleteTaskResponse struct {
 var completeTaskOperation = chasm.NewSyncOperation("CompleteTask", func(ctx chasm.EngineContext, request *CompleteTaskRequest, options nexus.StartOperationOptions) (*CompleteTaskResponse, error) {
 	err := chasm.UpdateComponent(ctx, request.Ref, func(ctx chasm.WriteContext, w Workflow) error {
 		act := w.Activities.AddEmpty("some-id")
-		return activity.InitActivity(ctx, act, &activity.StartRequest{})
+		events := w.EventStore.GetOrDefault()
+
+		return activity.InitActivity(ctx, act, &activity.InitActivityOptions{
+			Event:      &activity.ScheduledEvent{},
+			EventStore: events,
+		})
 	})
 
 	if err != nil {
