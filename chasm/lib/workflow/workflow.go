@@ -46,6 +46,20 @@ type Workflow struct {
 	Activities *chasm.ComponentMap[activity.Activity]
 }
 
+func (w Workflow) CompleteTask(ctx chasm.WriteContext, request *CompleteTaskRequest) (*CompleteTaskResponse, error) {
+	events := w.EventStore.MustGet()
+
+	act, err := activity.NewActivity(ctx, &activity.ActivityOptions{
+		Event:      &activity.ScheduledEvent{},
+		EventStore: events,
+	})
+	if err != nil {
+		return nil, err
+	}
+	w.Activities.Set("some-id", act)
+	return &CompleteTaskResponse{}, nil
+}
+
 type workflowOptions struct {
 }
 
@@ -143,23 +157,5 @@ type CompleteTaskResponse struct {
 }
 
 var completeTaskOperation = chasm.NewSyncOperation("CompleteTask", func(ctx chasm.EngineContext, request *CompleteTaskRequest, options nexus.StartOperationOptions) (*CompleteTaskResponse, error) {
-	err := chasm.UpdateComponent(ctx, request.Ref, func(ctx chasm.WriteContext, w Workflow) error {
-		events := w.EventStore.GetOrDefault()
-
-		act, err := activity.NewActivity(ctx, &activity.ActivityOptions{
-			Event:      &activity.ScheduledEvent{},
-			EventStore: events,
-		})
-		if err != nil {
-			return err
-		}
-		w.Activities.Set("some-id", act)
-		return nil
-	})
-
-	if err != nil {
-		return nil, err
-	}
-
-	return &CompleteTaskResponse{}, nil
+	return chasm.UpdateComponentAndReturn(ctx, request.Ref, Workflow.CompleteTask, request)
 })

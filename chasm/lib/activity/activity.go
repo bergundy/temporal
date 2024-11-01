@@ -79,6 +79,13 @@ func NewActivity(ctx chasm.WriteContext, options *ActivityOptions) (Activity, er
 	return activity, nil
 }
 
+func (a Activity) RecordTaskStarted(ctx chasm.WriteContext, request *RecordTaskStartedRequest) error {
+	// Transition only from Scheduled and other validations.
+	a.State.Status = StatusStarted
+	a.EventStore.MustGet().Get(ctx, 0) // TODO: get by token.
+	return nil
+}
+
 type activityComponentOptions struct {
 }
 
@@ -142,12 +149,7 @@ type RecordTaskStartedResponse struct {
 }
 
 var recordTaskStartedOperation = chasm.NewSyncOperation("RecordTaskStarted", func(ctx chasm.EngineContext, request *RecordTaskStartedRequest, options nexus.StartOperationOptions) (*RecordTaskStartedResponse, error) {
-	err := chasm.UpdateComponent(ctx, request.Ref, func(ctx chasm.WriteContext, activity Activity) error {
-		// Transition only from Scheduled and other validations.
-		activity.State.Status = StatusStarted
-		activity.EventStore.MustGet().Get(ctx, 0) // TODO: get by token.
-		return nil
-	})
+	err := chasm.UpdateComponent(ctx, request.Ref, Activity.RecordTaskStarted, request)
 	if err != nil {
 		return nil, err
 	}

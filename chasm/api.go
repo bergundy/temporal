@@ -85,15 +85,11 @@ type ComponentHandle[T Component] struct {
 	wctx   WriteContext
 }
 
-func (c *ComponentHandle[T]) MustGet() T {
-	panic("todo")
-}
-
 func (c *ComponentHandle[T]) Get() (T, bool) {
 	return ChildComponent[T](c.rctx, c.parent, c.key)
 }
 
-func (c *ComponentHandle[T]) GetOrDefault() T {
+func (c *ComponentHandle[T]) MustGet() T {
 	panic("todo")
 }
 
@@ -223,7 +219,7 @@ type EngineContext interface {
 	context.Context
 
 	createInstance(key InstanceKey, ctor func(ctx WriteContext) (Component, error)) error
-	upsertInstance(key InstanceKey, token ConsistencyToken, ctor func(ctx WriteContext, root any) error) error
+	upsertInstance(key InstanceKey, token ConsistencyToken, ctor func(ctx WriteContext, root Component) (Component, error)) error
 
 	// Do we just want functions to access components directly?
 	updateInstance(key InstanceKey, token ConsistencyToken, ctor func(ctx WriteContext, root any) error) error
@@ -239,11 +235,15 @@ func CreateInstance[T any, I any](ctx EngineContext, key InstanceKey, ctor func(
 	})
 }
 
-func UpdateExecution[T any](context.Context, InstanceKey, ConsistencyToken, func(root T) error) error {
+func UpdateInstance[T any, I any](context.Context, InstanceKey, ConsistencyToken, func(root T, input I) error) error {
 	panic("not implemented")
 }
 
-func UpdateComponent[T any](ctx EngineContext, ref Ref, fn func(ctx WriteContext, comp T) error) error {
+func UpdateComponentAndReturn[T Component, I any, O any](ctx EngineContext, ref Ref, fn func(comp T, ctx WriteContext, input I) (O, error), input I) (O, error) {
+	panic("not implemented")
+}
+
+func UpdateComponent[T Component, I any](ctx EngineContext, ref Ref, fn func(comp T, ctx WriteContext, input I) error, input I) error {
 	panic("not implemented")
 }
 
