@@ -55,6 +55,7 @@ func (*workflowOptions) TypeName() string {
 func (*workflowOptions) Storage() chasm.StorageOptions {
 	return chasm.StorageOptionsPersistent{}
 }
+
 func InitWorkflow(ctx chasm.WriteContext, w Workflow, request *ExecuteRequest) error {
 	// TODO: Attach callback state machines from options.
 	w.State = &State{}

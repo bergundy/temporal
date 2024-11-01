@@ -99,7 +99,7 @@ func (d *scheduleTaskOptions) Execute(ctx chasm.EngineContext, ref chasm.Ref, ta
 }
 
 func (*scheduleTaskOptions) loadRequest(ctx chasm.EngineContext, ref chasm.Ref, task ScheduleTask) (request *matchingservice.AddActivityTaskRequest, err error) {
-	err = chasm.ReadComponent(ctx, ref, func(root Activity) error {
+	err = chasm.ReadComponent(ctx, ref, func(ctx chasm.ReadContext, activity Activity) error {
 		// TODO: Populate with data from state machine.
 		request = &matchingservice.AddActivityTaskRequest{}
 		return nil
@@ -116,9 +116,9 @@ type RecordTaskStartedResponse struct {
 }
 
 var recordTaskStartedOperation = chasm.NewSyncOperation("RecordTaskStarted", func(ctx chasm.EngineContext, request *RecordTaskStartedRequest, options nexus.StartOperationOptions) (*RecordTaskStartedResponse, error) {
-	err := chasm.UpdateComponent(ctx, request.Ref, func(sm Activity) error {
+	err := chasm.UpdateComponent(ctx, request.Ref, func(ctx chasm.WriteContext, activity Activity) error {
 		// Transition only from Scheduled and other validations.
-		sm.State.Status = StatusStarted
+		activity.State.Status = StatusStarted
 		return nil
 	})
 	if err != nil {

@@ -3,6 +3,7 @@ package chasm
 import (
 	"context"
 	"errors"
+	"iter"
 	"reflect"
 	"time"
 
@@ -37,9 +38,9 @@ type Instance struct {
 type Component any
 
 type ReadContext interface {
-	context.Context
 	Instance() *Instance
 	Child(component Component, path ...string) (Component, bool)
+	Walk(component Component) iter.Seq2[[]string, Component]
 }
 
 type WriteContext interface {
@@ -70,6 +71,7 @@ func (c *ComponentMap[T]) Get(key string) (T, bool) {
 
 func (c *ComponentMap[T]) AddEmpty(key string) T {
 	// TODO
+	panic("not implemented")
 }
 
 // func SpawnMapChild[T Component, I any](c *ComponentMap[T], key string, input I, init func(ctx WriteContext, instance T, input I) error) error {
@@ -162,7 +164,7 @@ type TaskAttributes struct {
 type ConsistencyToken []byte
 
 type Ref struct {
-	ExecutionKey     InstanceKey
+	InstanceKey      InstanceKey
 	ComponentPath    []string
 	ConsistencyToken ConsistencyToken
 

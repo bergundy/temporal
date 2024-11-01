@@ -1,7 +1,6 @@
 package display
 
 import (
-	"context"
 	"encoding/json"
 
 	"github.com/nexus-rpc/sdk-go/nexus"
@@ -9,15 +8,6 @@ import (
 )
 
 type Library struct {
-}
-
-// Components implements chasm.Library.
-func (Library) Components() []chasm.RegisterableComponentDefinition {
-	return nil
-}
-
-func (Library) Tasks() []chasm.RegisterableTaskDefinition {
-	return nil
 }
 
 func (Library) Services() (services []*nexus.Service) {
@@ -30,7 +20,7 @@ func (Library) Services() (services []*nexus.Service) {
 
 // NOTE all of this will be in proto definitions. Actual structure of Describe and List operations is not yet defined, this is just an example.
 type DescribeRequest struct {
-	Key chasm.ExecutionKey
+	Key chasm.InstanceKey
 }
 
 type DescribeResponse struct {
@@ -46,10 +36,11 @@ type Describable interface {
 	Describe() json.RawMessage
 }
 
-var describeOperation = chasm.NewSyncOperation("Describe", func(ctx context.Context, engine chasm.Engine, request *DescribeRequest, options nexus.StartOperationOptions) (*DescribeResponse, error) {
+var describeOperation = chasm.NewSyncOperation("Describe", func(ctx chasm.EngineContext, request *DescribeRequest, options nexus.StartOperationOptions) (*DescribeResponse, error) {
 	descriptions := make([]ComponentDescription, 0)
-	err := engine.ReadExecution(ctx, request.Key, nil, func(root chasm.Component) error {
-		for path, node := range root.Walk() {
+	ref := chasm.Ref{InstanceKey: request.Key}
+	err := chasm.ReadComponent(ctx, ref, func(ctx chasm.ReadContext, root chasm.Component) error {
+		for path, node := range ctx.Walk(root) {
 			if desc, ok := node.(Describable); ok {
 				descriptions = append(descriptions, ComponentDescription{
 					Path: path,
