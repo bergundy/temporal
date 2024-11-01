@@ -11,6 +11,15 @@ import (
 type Library struct {
 }
 
+func (Library) Components() (comps []chasm.ComponentType) {
+	comps = append(comps,
+		chasm.NewComponentType[Workflow](chasm.ComponentTypeOptions{}),
+		chasm.NewComponentType[Memo](chasm.ComponentTypeOptions{}),
+		chasm.NewComponentType[EventStore](chasm.ComponentTypeOptions{}),
+	)
+	return
+}
+
 func (Library) Tasks() (defs []chasm.TaskType) {
 	panic("unimplemented")
 }

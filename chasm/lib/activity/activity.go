@@ -10,6 +10,11 @@ import (
 type Library struct {
 }
 
+func (Library) Components() (comps []chasm.ComponentType) {
+	comps = append(comps, chasm.NewComponentType[Activity](chasm.ComponentTypeOptions{}))
+	return
+}
+
 // Components implements chasm.Library.
 func (Library) Tasks() (defs []chasm.TaskType) {
 	defs = append(defs, chasm.NewTaskType[ScheduleTask](&scheduleTaskOptions{}))

@@ -37,6 +37,23 @@ type Instance struct {
 
 type Component any
 
+type ComponentTypeOptions struct {
+	TypeName string
+}
+
+type ComponentType struct {
+	ComponentTypeOptions
+
+	typ reflect.Type
+}
+
+func NewComponentType[T Component](opts ComponentTypeOptions) ComponentType {
+	var t [0]T
+	typ := reflect.TypeOf(t).Elem()
+
+	return ComponentType{opts, typ}
+}
+
 type ReadContext interface {
 	Instance() *Instance
 	Child(component Component, path ...string) (Component, bool)
@@ -186,6 +203,7 @@ func (t TaskType) ReflectType() reflect.Type {
 }
 
 type Library interface {
+	Components() []ComponentType
 	Tasks() []TaskType
 	Services() []*nexus.Service
 }
