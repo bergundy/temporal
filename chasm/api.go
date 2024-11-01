@@ -49,6 +49,10 @@ type WriteContext interface {
 	addChild(key string, component Component)
 }
 
+func NewComponent[T Component](ctx WriteContext) T {
+	panic("todo")
+}
+
 func ChildComponent[T Component](ctx ReadContext, comp Component, key ...string) (T, bool) {
 	c, ok := ctx.Child(comp, key...)
 	if !ok {
@@ -69,25 +73,10 @@ func (c *ComponentMap[T]) Get(key string) (T, bool) {
 	return ChildComponent[T](c.rctx, c.parent, c.key, key)
 }
 
-func (c *ComponentMap[T]) AddEmpty(key string) T {
-	// TODO
-	panic("not implemented")
-}
-
 func (c *ComponentMap[T]) Set(key string, value T) {
 	// TODO
 	panic("not implemented")
 }
-
-// func SpawnMapChild[T Component, I any](c *ComponentMap[T], key string, input I, init func(ctx WriteContext, instance T, input I) error) error {
-// 	// TODO: c.wctx.addChild(key, comp)
-// 	panic("todo")
-// }
-
-// func (c *ComponentMap[T]) Spawn(key string, input any, init func(ctx WriteContext, instance T, input any) error) error {
-// 	// TODO: c.wctx.addChild(key, comp)
-// 	panic("todo")
-// }
 
 type ComponentHandle[T Component] struct {
 	parent Component
@@ -105,10 +94,6 @@ func (c *ComponentHandle[T]) Get() (T, bool) {
 }
 
 func (c *ComponentHandle[T]) GetOrDefault() T {
-	panic("todo")
-}
-
-func (c *ComponentHandle[T]) SetEmpty() T {
 	panic("todo")
 }
 
@@ -237,23 +222,20 @@ type Library interface {
 type EngineContext interface {
 	context.Context
 
-	createExecution(key InstanceKey, ctor func(ctx WriteContext) (Component, error)) error
-	upsertExecution(key InstanceKey, token ConsistencyToken, ctor func(ctx WriteContext, root any) error) error
+	createInstance(key InstanceKey, ctor func(ctx WriteContext) (Component, error)) error
+	upsertInstance(key InstanceKey, token ConsistencyToken, ctor func(ctx WriteContext, root any) error) error
 
 	// Do we just want functions to access components directly?
-	updateExecution(key InstanceKey, token ConsistencyToken, ctor func(ctx WriteContext, root any) error) error
-	readExecution(key InstanceKey, token ConsistencyToken, ctor func(ctx ReadContext, root any) error) error
+	updateInstance(key InstanceKey, token ConsistencyToken, ctor func(ctx WriteContext, root any) error) error
+	readInstance(key InstanceKey, token ConsistencyToken, ctor func(ctx ReadContext, root any) error) error
 
 	updateComponent(ref Ref, ctor func(ctx WriteContext, comp any) error) error
 	readComponent(ref Ref, ctor func(ctx ReadContext, comp any) error) error
 }
 
-func CreateExecution[T any, I any](ctx EngineContext, key InstanceKey, input I, init func(ctx WriteContext, root T, input I) error) error {
-	return ctx.createExecution(key, func(ctx WriteContext) (Component, error) {
-		var root T
-		// TODO: reflect magic...
-		err := init(ctx, root, input)
-		return root, err
+func CreateInstance[T any, I any](ctx EngineContext, key InstanceKey, ctor func(ctx WriteContext, input I) (T, error), input I) error {
+	return ctx.createInstance(key, func(ctx WriteContext) (Component, error) {
+		return ctor(ctx, input)
 	})
 }
 

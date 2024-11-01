@@ -80,13 +80,15 @@ func (*embeddedEventStoreOptions) Storage() chasm.StorageOptions {
 	return chasm.StorageOptionsHistory{}
 }
 
-func InitWorkflow(ctx chasm.WriteContext, w Workflow, request *ExecuteRequest) error {
+func NewWorkflow(ctx chasm.WriteContext, request *ExecuteRequest) (Workflow, error) {
+	w := chasm.NewComponent[Workflow](ctx)
 	// TODO: Attach callback state machines from options.
 	w.State = &State{}
-	memo := w.Memo.SetEmpty()
+	memo := chasm.NewComponent[Memo](ctx)
 	memo.State = nil // TODO
+	w.Memo.Set(memo)
 	// TODO: Add workflow task...
-	return nil
+	return w, nil
 }
 
 // This will have codegen.
@@ -121,7 +123,7 @@ func (*executeOperation) Name() string {
 // Start implements nexus.Operation.
 func (o *executeOperation) Start(ctx chasm.EngineContext, request *ExecuteRequest, opts nexus.StartOperationOptions) (nexus.HandlerStartOperationResult[*ExecuteResponse], error) {
 	key := chasm.InstanceKey{NamespaceID: request.NamespaceID, BusinessID: request.ID}
-	err := chasm.CreateExecution(ctx, key, request, InitWorkflow)
+	err := chasm.CreateInstance(ctx, key, NewWorkflow, request)
 	if err != nil {
 		return nil, err
 	}
@@ -142,13 +144,17 @@ type CompleteTaskResponse struct {
 
 var completeTaskOperation = chasm.NewSyncOperation("CompleteTask", func(ctx chasm.EngineContext, request *CompleteTaskRequest, options nexus.StartOperationOptions) (*CompleteTaskResponse, error) {
 	err := chasm.UpdateComponent(ctx, request.Ref, func(ctx chasm.WriteContext, w Workflow) error {
-		act := w.Activities.AddEmpty("some-id")
 		events := w.EventStore.GetOrDefault()
 
-		return activity.InitActivity(ctx, act, &activity.InitActivityOptions{
+		act, err := activity.NewActivity(ctx, &activity.ActivityOptions{
 			Event:      &activity.ScheduledEvent{},
 			EventStore: events,
 		})
+		if err != nil {
+			return err
+		}
+		w.Activities.Set("some-id", act)
+		return nil
 	})
 
 	if err != nil {

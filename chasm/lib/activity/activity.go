@@ -12,7 +12,7 @@ type Library struct {
 
 // Components implements chasm.Library.
 func (Library) Components() (defs []chasm.ComponentType) {
-	defs = append(defs, chasm.NewComponentType[Activity](&activityOptions{}))
+	defs = append(defs, chasm.NewComponentType[Activity](&activityComponentOptions{}))
 	return
 }
 
@@ -56,12 +56,13 @@ func (ScheduledEvent) ID() int64 {
 	return 0
 }
 
-type InitActivityOptions struct {
+type ActivityOptions struct {
 	EventStore eventstore.EventStore
 	Event      *ScheduledEvent
 }
 
-func InitActivity(ctx chasm.WriteContext, activity Activity, options *InitActivityOptions) error {
+func NewActivity(ctx chasm.WriteContext, options *ActivityOptions) (Activity, error) {
+	activity := chasm.NewComponent[Activity](ctx)
 	activity.State = &State{
 		Status: StatusScheduled,
 	}
@@ -69,17 +70,19 @@ func InitActivity(ctx chasm.WriteContext, activity Activity, options *InitActivi
 	if options.EventStore == nil {
 		s = options.EventStore
 	} else {
-		s = eventstore.EmbeddedEventStore{State: &struct{ Exclude []string }{Exclude: []string{"ActivityStartedEvent"}}}
+		es := chasm.NewComponent[eventstore.EmbeddedEventStore](ctx)
+		es.State = &struct{ Exclude []string }{Exclude: []string{"ActivityStartedEvent"}}
+		s = es
 	}
 	activity.EventStore.Set(s)
 	s.Add(ctx, options.Event)
-	return nil
+	return activity, nil
 }
 
-type activityOptions struct {
+type activityComponentOptions struct {
 }
 
-func (*activityOptions) Storage() chasm.StorageOptions {
+func (*activityComponentOptions) Storage() chasm.StorageOptions {
 	return chasm.StorageOptionsPersistent{}
 }
 
@@ -162,10 +165,10 @@ type StartResponse struct {
 
 var startOperation = chasm.NewSyncOperation("Start", func(ctx chasm.EngineContext, request *StartRequest, options nexus.StartOperationOptions) (*StartResponse, error) {
 	key := chasm.InstanceKey{NamespaceID: request.NamespaceID, BusinessID: request.ID}
-	initOpts := &InitActivityOptions{
+	initOpts := &ActivityOptions{
 		Event: &ScheduledEvent{},
 	}
-	err := chasm.CreateExecution(ctx, key, initOpts, InitActivity)
+	err := chasm.CreateInstance(ctx, key, NewActivity, initOpts)
 	if err != nil {
 		return nil, err
 	}
