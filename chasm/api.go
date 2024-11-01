@@ -239,15 +239,9 @@ func UpdateInstance[T any, I any](context.Context, InstanceKey, ConsistencyToken
 	panic("not implemented")
 }
 
-func UpdateComponentAndReturn[T Component, I any, O any](ctx EngineContext, ref Ref, fn func(comp T, ctx WriteContext, input I) (O, error), input I) (O, error) {
-	panic("not implemented")
-}
+type NoValue *struct{}
 
-func UpdateComponent[T Component, I any](ctx EngineContext, ref Ref, fn func(comp T, ctx WriteContext, input I) error, input I) error {
-	panic("not implemented")
-}
-
-func ReadComponent[T any](ctx EngineContext, ref Ref, fn func(ctx ReadContext, comp T) error) error {
+func Execute[T Component, C ReadContext, I any, O any](ctx EngineContext, ref Ref, fn func(comp T, ctx C, input I) (O, error), input I) (O, error) {
 	panic("not implemented")
 }
 
@@ -291,4 +285,18 @@ func (h *syncOperation[I, O]) Start(ctx context.Context, input I, options nexus.
 		return nil, err
 	}
 	return &nexus.HandlerStartOperationResultSync[O]{Value: o}, err
+}
+
+func NewReadOperation[I, O any, C Component](name string, handler func(comp C, ctx ReadContext, i I) (O, error)) nexus.Operation[I, O] {
+	return NewSyncOperation(name, func(ctx EngineContext, i I, opts nexus.StartOperationOptions) (O, error) {
+		ref := Ref{} // TODO: extract from request.
+		return Execute(ctx, ref, handler, i)
+	})
+}
+
+func NewWriteOperation[I, O any, C Component](name string, handler func(comp C, ctx WriteContext, i I) (O, error)) nexus.Operation[I, O] {
+	return NewSyncOperation(name, func(ctx EngineContext, i I, opts nexus.StartOperationOptions) (O, error) {
+		ref := Ref{} // TODO: extract from request.
+		return Execute(ctx, ref, handler, i)
+	})
 }

@@ -36,10 +36,8 @@ type Describable interface {
 	Describe() json.RawMessage
 }
 
-var describeOperation = chasm.NewSyncOperation("Describe", func(ctx chasm.EngineContext, request *DescribeRequest, options nexus.StartOperationOptions) (*DescribeResponse, error) {
+var describeOperation = chasm.NewReadOperation("Describe", func (root chasm.Component, ctx chasm.ReadContext, request *DescribeRequest) (*DescribeResponse, error) {
 	descriptions := make([]ComponentDescription, 0)
-	ref := chasm.Ref{InstanceKey: request.Key}
-	err := chasm.ReadComponent(ctx, ref, func(ctx chasm.ReadContext, root chasm.Component) error {
 		for path, node := range ctx.Walk(root) {
 			if desc, ok := node.(Describable); ok {
 				descriptions = append(descriptions, ComponentDescription{
@@ -48,12 +46,6 @@ var describeOperation = chasm.NewSyncOperation("Describe", func(ctx chasm.Engine
 				})
 			}
 		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
 	return &DescribeResponse{
 		Components: descriptions,
 	}, nil

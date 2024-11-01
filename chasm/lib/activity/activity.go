@@ -79,13 +79,17 @@ func NewActivity(ctx chasm.WriteContext, options *ActivityOptions) (Activity, er
 	return activity, nil
 }
 
-func (a Activity) RecordTaskStarted(ctx chasm.WriteContext, request *RecordTaskStartedRequest) error {
+func (a Activity) RecordTaskStarted(ctx chasm.WriteContext, request *RecordTaskStartedRequest) (chasm.NoValue, error) {
 	// Transition only from Scheduled and other validations.
 	a.State.Status = StatusStarted
 	a.EventStore.MustGet().Get(ctx, 0) // TODO: get by token.
-	return nil
+	return nil, nil
 }
 
+func (a Activity) loadRequest(ctx chasm.ReadContext, task ScheduleTask) (request *matchingservice.AddActivityTaskRequest, err error) {
+	// TODO: Populate with data from state machine.
+	return &matchingservice.AddActivityTaskRequest{}, nil
+}
 type activityComponentOptions struct {
 }
 
@@ -123,21 +127,12 @@ func (*scheduleTaskOptions) Validate(ctx chasm.ReadContext, comp chasm.Component
 }
 
 func (d *scheduleTaskOptions) Execute(ctx chasm.EngineContext, ref chasm.Ref, task ScheduleTask) error {
-	request, err := d.loadRequest(ctx, ref, task)
+	request, err := chasm.Execute(ctx, ref, Activity.loadRequest, task)
 	if err != nil {
 		return err
 	}
 	_, err = d.matchingClient.AddActivityTask(ctx, request)
 	return err
-}
-
-func (*scheduleTaskOptions) loadRequest(ctx chasm.EngineContext, ref chasm.Ref, task ScheduleTask) (request *matchingservice.AddActivityTaskRequest, err error) {
-	err = chasm.ReadComponent(ctx, ref, func(ctx chasm.ReadContext, activity Activity) error {
-		// TODO: Populate with data from state machine.
-		request = &matchingservice.AddActivityTaskRequest{}
-		return nil
-	})
-	return
 }
 
 // This will have codegen.
@@ -149,7 +144,7 @@ type RecordTaskStartedResponse struct {
 }
 
 var recordTaskStartedOperation = chasm.NewSyncOperation("RecordTaskStarted", func(ctx chasm.EngineContext, request *RecordTaskStartedRequest, options nexus.StartOperationOptions) (*RecordTaskStartedResponse, error) {
-	err := chasm.UpdateComponent(ctx, request.Ref, Activity.RecordTaskStarted, request)
+	_, err := chasm.Execute(ctx, request.Ref, Activity.RecordTaskStarted, request)
 	if err != nil {
 		return nil, err
 	}

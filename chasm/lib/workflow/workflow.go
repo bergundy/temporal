@@ -23,7 +23,10 @@ func (Library) Tasks() (defs []chasm.TaskType) {
 
 func (l Library) Services() (defs []*nexus.Service) {
 	service := nexus.NewService("workflow")
-	_ = service.Register(&executeOperation{})
+	_ = service.Register(
+		&executeOperation{},
+		chasm.NewWriteOperation("CompleteTask", Workflow.CompleteTask),
+	)
 	defs = append(defs, service)
 	return
 }
@@ -100,6 +103,7 @@ func NewWorkflow(ctx chasm.WriteContext, request *ExecuteRequest) (Workflow, err
 	w.State = &State{}
 	memo := chasm.NewComponent[Memo](ctx)
 	memo.State = nil // TODO
+	w.EventStore.Set(chasm.NewComponent[EventStore](ctx))
 	w.Memo.Set(memo)
 	// TODO: Add workflow task...
 	return w, nil
@@ -155,7 +159,3 @@ type CompleteTaskRequest struct {
 
 type CompleteTaskResponse struct {
 }
-
-var completeTaskOperation = chasm.NewSyncOperation("CompleteTask", func(ctx chasm.EngineContext, request *CompleteTaskRequest, options nexus.StartOperationOptions) (*CompleteTaskResponse, error) {
-	return chasm.UpdateComponentAndReturn(ctx, request.Ref, Workflow.CompleteTask, request)
-})
