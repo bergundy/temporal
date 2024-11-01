@@ -46,7 +46,7 @@ type State struct {
 type Activity struct {
 	State *State
 
-	EventStore *chasm.ComponentHandle[eventstore.EventStore]
+	EventStore *chasm.Ptr[eventstore.EventStore]
 }
 
 type ScheduledEvent struct {

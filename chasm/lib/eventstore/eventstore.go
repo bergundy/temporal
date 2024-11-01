@@ -25,7 +25,6 @@ func (Library) Services() (defs []*nexus.Service) {
 	return
 }
 
-
 type Event interface {
 	ID() int64
 }
@@ -40,7 +39,7 @@ type EventStore interface {
 type EmbeddedEventStore struct {
 	State *struct{ Exclude []string }
 
-	Events *chasm.ComponentMap[Event]
+	Events *chasm.Map[Event]
 }
 
 func (s EmbeddedEventStore) Add(ctx chasm.WriteContext, event Event) {

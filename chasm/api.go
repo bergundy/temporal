@@ -79,38 +79,38 @@ func ChildComponent[T Component](ctx ReadContext, comp Component, key ...string)
 	return c.(T), true
 }
 
-type ComponentMap[T Component] struct {
+type Map[T Component] struct {
 	parent Component
 	key    string
 	rctx   ReadContext
 	wctx   WriteContext
 }
 
-func (c *ComponentMap[T]) Get(key string) (T, bool) {
+func (c *Map[T]) Get(key string) (T, bool) {
 	return ChildComponent[T](c.rctx, c.parent, c.key, key)
 }
 
-func (c *ComponentMap[T]) Set(key string, value T) {
+func (c *Map[T]) Set(key string, value T) {
 	// TODO
 	panic("not implemented")
 }
 
-type ComponentHandle[T Component] struct {
+type Ptr[T Component] struct {
 	parent Component
 	key    string
 	rctx   ReadContext
 	wctx   WriteContext
 }
 
-func (c *ComponentHandle[T]) Get() (T, bool) {
+func (c *Ptr[T]) Get() (T, bool) {
 	return ChildComponent[T](c.rctx, c.parent, c.key)
 }
 
-func (c *ComponentHandle[T]) MustGet() T {
+func (c *Ptr[T]) MustGet() T {
 	panic("todo")
 }
 
-func (c *ComponentHandle[T]) Set(value T) {
+func (c *Ptr[T]) Set(value T) {
 	// TODO
 	panic("not implemented")
 }

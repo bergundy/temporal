@@ -47,9 +47,9 @@ type Memo struct {
 type Workflow struct {
 	State *State // proto.Message
 
-	EventStore *chasm.ComponentHandle[eventstore.EventStore]
-	Memo       *chasm.ComponentHandle[Memo]
-	Activities *chasm.ComponentMap[activity.Activity]
+	EventStore *chasm.Ptr[eventstore.EventStore]
+	Memo       *chasm.Ptr[Memo]
+	Activities *chasm.Map[activity.Activity]
 }
 
 func (w Workflow) CompleteTask(ctx chasm.WriteContext, request *CompleteTaskRequest) (*CompleteTaskResponse, error) {
@@ -81,7 +81,7 @@ func (*workflowOptions) Storage() chasm.StorageOptions {
 type EventStore struct {
 	State *struct{ Exclude []string }
 
-	Events *chasm.ComponentMap[eventstore.Event]
+	Events *chasm.Map[eventstore.Event]
 }
 
 func (s EventStore) Add(ctx chasm.WriteContext, event eventstore.Event) {
