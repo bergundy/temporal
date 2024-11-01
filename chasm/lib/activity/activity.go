@@ -11,11 +11,6 @@ type Library struct {
 }
 
 // Components implements chasm.Library.
-func (Library) Components() (defs []chasm.ComponentType) {
-	defs = append(defs, chasm.NewComponentType[Activity](&activityComponentOptions{}))
-	return
-}
-
 func (Library) Tasks() (defs []chasm.TaskType) {
 	defs = append(defs, chasm.NewTaskType[ScheduleTask](&scheduleTaskOptions{}))
 	return
@@ -90,12 +85,6 @@ func (a Activity) loadRequest(ctx chasm.ReadContext, task ScheduleTask) (request
 	// TODO: Populate with data from state machine.
 	return &matchingservice.AddActivityTaskRequest{}, nil
 }
-type activityComponentOptions struct {
-}
-
-func (*activityComponentOptions) Storage() chasm.StorageOptions {
-	return chasm.StorageOptionsPersistent{}
-}
 
 type ScheduleTask struct{}
 
@@ -165,7 +154,9 @@ var startOperation = chasm.NewSyncOperation("Start", func(ctx chasm.EngineContex
 	initOpts := &ActivityOptions{
 		Event: &ScheduledEvent{},
 	}
-	err := chasm.CreateInstance(ctx, key, NewActivity, initOpts)
+	err := chasm.CreateInstance(ctx, key, NewActivity, initOpts, chasm.ComponentOptions{
+		Storage: chasm.StorageOptionsPersistent{},
+	})
 	if err != nil {
 		return nil, err
 	}

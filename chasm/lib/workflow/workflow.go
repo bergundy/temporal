@@ -11,12 +11,6 @@ import (
 type Library struct {
 }
 
-// Components implements chasm.Library.
-func (Library) Components() (defs []chasm.ComponentType) {
-	defs = append(defs, chasm.NewComponentType[Workflow](&workflowOptions{}))
-	return
-}
-
 func (Library) Tasks() (defs []chasm.TaskType) {
 	panic("unimplemented")
 }
@@ -141,7 +135,9 @@ func (*executeOperation) Name() string {
 // Start implements nexus.Operation.
 func (o *executeOperation) Start(ctx chasm.EngineContext, request *ExecuteRequest, opts nexus.StartOperationOptions) (nexus.HandlerStartOperationResult[*ExecuteResponse], error) {
 	key := chasm.InstanceKey{NamespaceID: request.NamespaceID, BusinessID: request.ID}
-	err := chasm.CreateInstance(ctx, key, NewWorkflow, request)
+	err := chasm.CreateInstance(ctx, key, NewWorkflow, request, chasm.ComponentOptions{
+		Storage: chasm.StorageOptionsPersistent{},
+	})
 	if err != nil {
 		return nil, err
 	}

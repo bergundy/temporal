@@ -122,32 +122,8 @@ type StorageOptionsHistory struct {
 
 func (StorageOptionsHistory) mustImplmenentStorageOptions() {}
 
-type ComponentOptions[T Component] interface {
-	Storage() StorageOptions
-}
-
-type untypedComponentOptions struct {
-}
-
-func newUntypedComponentOptions[T Component](ComponentOptions[T]) untypedComponentOptions {
-	return untypedComponentOptions{} // TODO
-}
-
-type ComponentType struct {
-	untypedComponentOptions
-
-	typ reflect.Type
-}
-
-func NewComponentType[T Component](opts ComponentOptions[T]) ComponentType {
-	var t [0]T
-	typ := reflect.TypeOf(t).Elem()
-
-	return ComponentType{newUntypedComponentOptions[T](opts), typ}
-}
-
-func (c ComponentType) ReflectType() reflect.Type {
-	return c.typ
+type ComponentOptions struct {
+	Storage StorageOptions
 }
 
 var Immediate = time.Time{}
@@ -210,7 +186,6 @@ func (t TaskType) ReflectType() reflect.Type {
 }
 
 type Library interface {
-	Components() []ComponentType
 	Tasks() []TaskType
 	Services() []*nexus.Service
 }
@@ -218,7 +193,7 @@ type Library interface {
 type EngineContext interface {
 	context.Context
 
-	createInstance(key InstanceKey, ctor func(ctx WriteContext) (Component, error)) error
+	createInstance(key InstanceKey, ctor func(ctx WriteContext) (Component, error), options ComponentOptions) error
 	upsertInstance(key InstanceKey, token ConsistencyToken, ctor func(ctx WriteContext, root Component) (Component, error)) error
 
 	// Do we just want functions to access components directly?
@@ -229,10 +204,10 @@ type EngineContext interface {
 	readComponent(ref Ref, ctor func(ctx ReadContext, comp any) error) error
 }
 
-func CreateInstance[T any, I any](ctx EngineContext, key InstanceKey, ctor func(ctx WriteContext, input I) (T, error), input I) error {
+func CreateInstance[T any, I any](ctx EngineContext, key InstanceKey, ctor func(ctx WriteContext, input I) (T, error), input I, options ComponentOptions) error {
 	return ctx.createInstance(key, func(ctx WriteContext) (Component, error) {
 		return ctor(ctx, input)
-	})
+	}, options)
 }
 
 func UpdateInstance[T any, I any](context.Context, InstanceKey, ConsistencyToken, func(root T, input I) error) error {
@@ -247,9 +222,6 @@ func Execute[T Component, C ReadContext, I any, O any](ctx EngineContext, ref Re
 
 // Alternative:
 type Registry interface {
-}
-
-func RegisterComponent[T Component](reg Registry, opts ComponentOptions[T]) {
 }
 
 func RegisterTask[T Task](reg Registry, opts TaskOptions[T]) {

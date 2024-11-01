@@ -12,15 +12,10 @@ import (
 type Library struct {
 }
 
-// Components implements chasm.Library.
-func (Library) Components() (defs []chasm.RegisterableComponentDefinition) {
-	defs = append(defs, chasm.NewRegisterableComponentDefinition(&rateLimiterDefinition{}))
-	return
-}
-
-func (Library) Tasks() []chasm.RegisterableTaskDefinition {
+func (Library) Tasks() []chasm.TaskType {
 	return nil
 }
+
 
 func (Library) Services() (defs []*nexus.Service) {
 	service := nexus.NewService("ratelimiter")
@@ -32,35 +27,13 @@ func (Library) Services() (defs []*nexus.Service) {
 var _ chasm.Library = Library{}
 
 type RateLimiter struct {
-	*chasm.ComponentBase
-
 	lim *rate.Limiter
 }
 
-func NewStateMachine(base *chasm.ComponentBase) (chasm.Component, error) {
+func New(ctx chasm.ReadContext, options *struct{}) (chasm.Component, error) {
 	return RateLimiter{
-		base,
 		rate.NewLimiter(rate.Every(time.Second), 100),
 	}, nil
-}
-
-type rateLimiterDefinition struct {
-}
-
-func (*rateLimiterDefinition) Deserialize(data []byte, base *chasm.ComponentBase) (RateLimiter, error) {
-	panic("unimplemented")
-}
-
-func (*rateLimiterDefinition) Serialize(component RateLimiter) ([]byte, error) {
-	panic("unimplemented")
-}
-
-func (*rateLimiterDefinition) TypeName() string {
-	panic("unimplemented")
-}
-
-func (*rateLimiterDefinition) StorageType() chasm.StorageType {
-	return chasm.StorageTypeEphemeralLRU
 }
 
 // This will have codegen.
