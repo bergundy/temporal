@@ -36,48 +36,6 @@ func (l Library) Services() (defs []*nexus.Service) {
 
 var _ chasm.Library = Library{}
 
-// TODO: Some proto struct.
-type State struct {
-}
-
-type Memo struct {
-	State *commonpb.Payload
-}
-
-type Workflow struct {
-	State *State // proto.Message
-
-	EventStore *chasm.Ptr[eventstore.EventStore]
-	Memo       *chasm.Ptr[Memo]
-	Activities *chasm.Map[activity.Activity]
-}
-
-func (w Workflow) CompleteTask(ctx chasm.WriteContext, request *CompleteTaskRequest) (*CompleteTaskResponse, error) {
-	events := w.EventStore.MustGet()
-
-	act, err := activity.NewActivity(ctx, &activity.ActivityOptions{
-		Event:      &activity.ScheduledEvent{},
-		EventStore: events,
-	})
-	if err != nil {
-		return nil, err
-	}
-	w.Activities.Set("some-id", act)
-	return &CompleteTaskResponse{}, nil
-}
-
-type workflowOptions struct {
-}
-
-// not required.
-func (*workflowOptions) TypeName() string {
-	panic("unimplemented")
-}
-
-func (*workflowOptions) Storage() chasm.StorageOptions {
-	return chasm.StorageOptionsPersistent{}
-}
-
 type EventStore struct {
 	State *struct{ Exclude []string }
 
@@ -93,11 +51,20 @@ func (s EventStore) Get(ctx chasm.ReadContext, id int64) eventstore.Event {
 	panic("todo")
 }
 
-type embeddedEventStoreOptions struct {
+type Memo struct {
+	State *commonpb.Payload
 }
 
-func (*embeddedEventStoreOptions) Storage() chasm.StorageOptions {
-	return chasm.StorageOptionsHistory{}
+// TODO: Some proto struct.
+type State struct {
+}
+
+type Workflow struct {
+	State *State // proto.Message
+
+	EventStore *chasm.Ptr[eventstore.EventStore]
+	Memo       *chasm.Ptr[Memo]
+	Activities *chasm.Map[activity.Activity]
 }
 
 func NewWorkflow(ctx chasm.WriteContext, request *ExecuteRequest) (Workflow, error) {
@@ -110,6 +77,20 @@ func NewWorkflow(ctx chasm.WriteContext, request *ExecuteRequest) (Workflow, err
 	w.Memo.Set(memo)
 	// TODO: Add workflow task...
 	return w, nil
+}
+
+func (w Workflow) CompleteTask(ctx chasm.WriteContext, request *CompleteTaskRequest) (*CompleteTaskResponse, error) {
+	events := w.EventStore.MustGet()
+
+	act, err := activity.NewActivity(ctx, &activity.ActivityOptions{
+		Event:      &activity.ScheduledEvent{},
+		EventStore: events,
+	})
+	if err != nil {
+		return nil, err
+	}
+	w.Activities.Set("some-id", act)
+	return &CompleteTaskResponse{}, nil
 }
 
 // This will have codegen.
