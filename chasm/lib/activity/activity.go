@@ -43,10 +43,14 @@ type State struct {
 	Status Status
 }
 
-type Activity struct {
-	State *State
+type Activity interface {
+	RecordTaskStarted(ctx chasm.WriteContext, request *RecordTaskStartedRequest) (chasm.NoValue, error)
+}
 
-	EventStore *chasm.Ptr[eventstore.EventStore]
+type activity struct {
+	State State
+
+	EventStore chasm.Ptr[eventstore.EventStore]
 }
 
 type ScheduledEvent struct {
@@ -62,8 +66,8 @@ type ActivityOptions struct {
 }
 
 func NewActivity(ctx chasm.WriteContext, options *ActivityOptions) (Activity, error) {
-	activity := chasm.NewComponent[Activity](ctx)
-	activity.State = &State{
+	a := chasm.NewComponent[activity](ctx)
+	a.State = State{
 		Status: StatusScheduled,
 	}
 	var s eventstore.EventStore
@@ -74,19 +78,19 @@ func NewActivity(ctx chasm.WriteContext, options *ActivityOptions) (Activity, er
 		es.State = &struct{ Exclude []string }{Exclude: []string{"ActivityStartedEvent"}}
 		s = es
 	}
-	activity.EventStore.Set(s)
+	a.EventStore.Set(s)
 	s.Add(ctx, options.Event)
-	return activity, nil
+	return &a, nil
 }
 
-func (a Activity) RecordTaskStarted(ctx chasm.WriteContext, request *RecordTaskStartedRequest) (chasm.NoValue, error) {
+func (a *activity) RecordTaskStarted(ctx chasm.WriteContext, request *RecordTaskStartedRequest) (chasm.NoValue, error) {
 	// Transition only from Scheduled and other validations.
 	a.State.Status = StatusStarted
 	a.EventStore.MustGet().Get(ctx, 0) // TODO: get by token.
 	return nil, nil
 }
 
-func (a Activity) loadRequest(ctx chasm.ReadContext, task ScheduleTask) (request *matchingservice.AddActivityTaskRequest, err error) {
+func (a *activity) loadRequest(ctx chasm.ReadContext, task ScheduleTask) (request *matchingservice.AddActivityTaskRequest, err error) {
 	// TODO: Populate with data from state machine.
 	return &matchingservice.AddActivityTaskRequest{}, nil
 }
@@ -114,14 +118,14 @@ func (*scheduleTaskOptions) Validate(ctx chasm.ReadContext, comp chasm.Component
 	if ctx.Instance().State != chasm.InstanceStateRunning {
 		return chasm.ErrStaleReference
 	}
-	if comp.(Activity).State.Status != StatusScheduled {
+	if comp.(*activity).State.Status != StatusScheduled {
 		return chasm.ErrStaleReference
 	}
 	return nil
 }
 
 func (d *scheduleTaskOptions) Execute(ctx chasm.EngineContext, ref chasm.Ref, task ScheduleTask) error {
-	request, err := chasm.Execute(ctx, ref, Activity.loadRequest, task)
+	request, err := chasm.Execute(ctx, ref, (*activity).loadRequest, task)
 	if err != nil {
 		return err
 	}

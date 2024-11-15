@@ -54,10 +54,18 @@ func NewComponentType[T Component](opts ComponentTypeOptions) ComponentType {
 	return ComponentType{opts, typ}
 }
 
+type Intent int
+
+const (
+	IntentObserve = Intent(iota)
+	IntentProgress
+)
+
 type ReadContext interface {
 	Instance() *Instance
 	Child(component Component, path ...string) (Component, bool)
 	Walk(component Component) iter.Seq2[[]string, Component]
+	Intent() Intent
 }
 
 type WriteContext interface {
@@ -246,6 +254,9 @@ func RegisterTask[T Task](reg Registry, opts TaskOptions[T]) {
 }
 
 func RegisterService(reg Registry, service *nexus.Service) {
+}
+
+func RegisterComponentAdapter[Parent Component, Child Component](reg Registry, adapter func(ReadContext, Parent, Child) (Child, error)) {
 }
 
 type syncOperation[I, O any] struct {

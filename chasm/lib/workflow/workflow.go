@@ -1,6 +1,8 @@
 package workflow
 
 import (
+	"errors"
+
 	"github.com/nexus-rpc/sdk-go/nexus"
 	commonpb "go.temporal.io/api/common/v1"
 	"go.temporal.io/server/chasm"
@@ -144,4 +146,36 @@ type CompleteTaskRequest struct {
 }
 
 type CompleteTaskResponse struct {
+}
+
+type workflowActivity struct {
+	activity.Activity
+
+	workflow Workflow
+}
+
+// Optionally implement this.
+func (wa workflowActivity) RecordTaskStarted(ctx chasm.WriteContext, request *activity.RecordTaskStartedRequest) (chasm.NoValue, error) {
+	return wa.Activity.RecordTaskStarted(ctx, request)
+}
+
+// Can intercept specific components.
+func NewWorkflowActivity(ctx chasm.ReadContext, w Workflow, a activity.Activity) (activity.Activity, error) {
+	if ctx.Intent() == chasm.IntentProgress /* && !wa.workflow.Running() */ {
+		return nil, errors.New("TODO real error here")
+	}
+	return workflowActivity{a, w}, nil
+}
+
+// Can intercept any component.
+func NewWorkflowAny(ctx chasm.ReadContext, w Workflow, a chasm.Component) (chasm.Component, error) {
+	if ctx.Intent() == chasm.IntentProgress /* && !wa.workflow.Running() */ {
+		return nil, errors.New("TODO real error here")
+	}
+	return a, nil
+}
+
+func initialize(reg chasm.Registry) {
+	chasm.RegisterComponentAdapter(reg, NewWorkflowActivity)
+	chasm.RegisterComponentAdapter(reg, NewWorkflowAny)
 }
