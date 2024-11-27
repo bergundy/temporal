@@ -30,22 +30,26 @@ type Event interface {
 }
 
 type EventStore interface {
-	// TODO: Use tokens
-	Add(ctx chasm.WriteContext, event Event)
-	// TODO: Use tokens
-	Get(ctx chasm.ReadContext, id int64) Event
+	Add(ctx chasm.WriteContext, event Event) (token []byte)
+	Get(ctx chasm.ReadContext, token []byte) Event
+}
+
+// Some proto
+type EmbeddedEventStoreState struct {
+	// Can add filters for which events to store if needed.
 }
 
 type EmbeddedEventStore struct {
-	State *struct{ Exclude []string }
+	State EmbeddedEventStoreState
 
-	Events *chasm.Map[Event]
+	Events chasm.Map[Event]
 }
 
-func (s EmbeddedEventStore) Add(ctx chasm.WriteContext, event Event) {
+func (s EmbeddedEventStore) Add(ctx chasm.WriteContext, event Event) (token []byte) {
 	s.Events.Set(strconv.FormatInt(event.ID(), 10), event)
+	return []byte("TODO")
 }
 
-func (s EmbeddedEventStore) Get(ctx chasm.ReadContext, id int64) Event {
+func (s EmbeddedEventStore) Get(ctx chasm.ReadContext, token []byte) Event {
 	panic("todo")
 }
