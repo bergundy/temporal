@@ -1,6 +1,8 @@
 package activity
 
 import (
+	"context"
+
 	"github.com/nexus-rpc/sdk-go/nexus"
 	"go.temporal.io/server/api/matchingservice/v1"
 	"go.temporal.io/server/chasm"
@@ -172,3 +174,37 @@ var startOperation = chasm.NewSyncOperation("Start", func(ctx chasm.EngineContex
 
 	return &StartResponse{}, nil
 })
+
+
+type MyState struct {
+}
+
+type SomeOtherComponent struct {
+}
+
+type ComponentField[T any] struct {
+
+}
+
+type Request struct {
+	Token chasm.Ref
+}
+type Response struct {}
+
+type MyComponent struct {
+	State MyState
+	ChildComp ComponentField[SomeOtherComponent] `chasm:"lazy"`
+}
+  
+func (c *MyComponent) Foo(ctx chasm.ReadContext, request *Request) (*Response, error) {
+	panic("not implemented")
+// c.ChildComp.Get()....
+} 
+  
+  func myHandler(ctx context.Context, request *Request) (*Response, error) {
+	return chasm.Execute(ctx, request.Token, (*MyComponent).Foo, request, chasm.EagerLoad(func(c *MyComponent) []chasm.UntypedComponentField {
+		return []chasm.UntypedComponentField{
+			c.ChildComp,
+		}
+	}))
+  }

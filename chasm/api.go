@@ -242,7 +242,36 @@ func UpdateInstance[T any, I any](context.Context, InstanceKey, ConsistencyToken
 
 type NoValue *struct{}
 
-func Execute[T Component, C ReadContext, I any, O any](ctx EngineContext, ref Ref, fn func(comp T, ctx C, input I) (O, error), input I) (O, error) {
+type ComponentField[T Component] struct {
+	parent Component
+	key    string
+	rctx   ReadContext
+	wctx   WriteContext
+}
+
+type UntypedComponentField interface {
+}
+
+type ExecuteOption interface {
+	apply(*ExecuteOptions)
+}
+
+type EagerLoadExecuteOption []UntypedComponentField
+
+func (e EagerLoadExecuteOption) apply(o *ExecuteOptions) {
+	o.EagerLoad = e
+}
+
+type ExecuteOptions struct {
+	EagerLoad []UntypedComponentField
+}
+
+func EagerLoad[T any](f func(T) []UntypedComponentField) ExecuteOption {
+	var t T
+	return EagerLoadExecuteOption(f(t))
+}
+
+func Execute[T Component, C ReadContext, I any, O any](ctx context.Context, ref Ref, fn func(comp T, ctx C, input I) (O, error), input I, options ...ExecuteOption) (O, error) {
 	panic("not implemented")
 }
 
