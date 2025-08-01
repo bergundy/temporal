@@ -80,8 +80,10 @@ require (
 	modernc.org/sqlite v1.34.1
 )
 
+require github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.3.2 // indirect
+
 require (
-	cel.dev/expr v0.20.0 // indirect
+	cel.dev/expr v0.23.1 // indirect
 	cloud.google.com/go v0.118.3 // indirect; indirect e
 	cloud.google.com/go/auth v0.15.0 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.2.7 // indirect
@@ -118,7 +120,6 @@ require (
 	github.com/google/s2a-go v0.1.9 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.5 // indirect
 	github.com/googleapis/gax-go/v2 v2.14.1 // indirect
-	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0 // indirect
 	github.com/hailocab/go-hostpool v0.0.0-20160125115350-e80d13ce29ed // indirect
 	github.com/hashicorp/golang-lru/v2 v2.0.7 // indirect
 	github.com/huandu/xstrings v1.5.0 // indirect
@@ -181,4 +182,10 @@ require (
 	modernc.org/opt v0.1.4 // indirect
 	modernc.org/strutil v1.2.1 // indirect
 	modernc.org/token v1.1.0 // indirect
+)
+
+replace (
+	github.com/nexus-rpc/sdk-go => ../nexus-sdk-go
+	go.temporal.io/api => ../api-go
+	go.temporal.io/sdk => ../sdk-go
 )

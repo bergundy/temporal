@@ -13,6 +13,7 @@ import (
 	"github.com/nexus-rpc/sdk-go/nexus"
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/server/api/matchingservice/v1"
+	"go.temporal.io/sdk/temporal"
 	persistencespb "go.temporal.io/server/api/persistence/v1"
 	"go.temporal.io/server/common/authorization"
 	"go.temporal.io/server/common/cluster"
@@ -91,6 +92,7 @@ func NewNexusHTTPHandler(
 				headersBlacklist:              serviceConfig.NexusRequestHeadersBlacklist,
 				metricTagConfig:               serviceConfig.NexusOperationsMetricTagConfig,
 				httpTraceProvider:             httpTraceProvider,
+				temporalFailureConverter:      temporal.NewDefaultFailureConverter(temporal.DefaultFailureConverterOptions{}),
 			},
 			GetResultTimeout: serviceConfig.KeepAliveMaxConnectionIdle(),
 			Logger:           log.NewSlogLogger(logger),

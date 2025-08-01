@@ -19,6 +19,7 @@ import (
 	nexuspb "go.temporal.io/api/nexus/v1"
 	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
+	"go.temporal.io/sdk/converter"
 	"go.temporal.io/server/api/matchingservice/v1"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/authorization"
@@ -302,6 +303,7 @@ type nexusHandler struct {
 	headersBlacklist              dynamicconfig.TypedPropertyFn[*regexp.Regexp]
 	metricTagConfig               dynamicconfig.TypedPropertyFn[nexusoperations.NexusMetricTagConfig]
 	httpTraceProvider             commonnexus.HTTPClientTraceProvider
+	temporalFailureConverter      converter.FailureConverter
 }
 
 // Extracts a nexusContext from the given ctx and returns an operationContext with tagged metrics and logging.
@@ -424,7 +426,14 @@ func (h *nexusHandler) StartOperation(
 	}
 	// Convert to standard Nexus SDK response.
 	switch t := response.GetOutcome().(type) {
+	case *matchingservice.DispatchNexusTaskResponse_Failure:
+		oc.metricsHandler = oc.metricsHandler.WithTags(metrics.OutcomeTag("handler_error:" + t.Failure.GetNexusHandlerFailureInfo().GetType()))
+
+		oc.nexusContext.setFailureSource(commonnexus.FailureSourceWorker)
+
+		return nil, h.temporalFailureConverter.FailureToError(t.Failure)
 	case *matchingservice.DispatchNexusTaskResponse_HandlerError:
+		// Deprecated case, replaced with DispatchNexusTaskResponse_Failure.
 		oc.metricsHandler = oc.metricsHandler.WithTags(metrics.OutcomeTag("handler_error:" + t.HandlerError.GetErrorType()))
 
 		oc.nexusContext.setFailureSource(commonnexus.FailureSourceWorker)
@@ -453,7 +462,15 @@ func (h *nexusHandler) StartOperation(
 				Links:          parseLinks(t.AsyncSuccess.GetLinks(), oc.logger),
 			}, nil
 
+		case *nexuspb.StartOperationResponse_Failure:
+			oc.metricsHandler = oc.metricsHandler.WithTags(metrics.OutcomeTag("operation_error"))
+
+			oc.nexusContext.setFailureSource(commonnexus.FailureSourceWorker)
+
+			return nil, h.temporalFailureConverter.FailureToError(t.Failure)
+
 		case *nexuspb.StartOperationResponse_OperationError:
+			// Deprecated case, replaced with StartOperationResponse_Failure.
 			oc.metricsHandler = oc.metricsHandler.WithTags(metrics.OutcomeTag("operation_error"))
 
 			oc.nexusContext.setFailureSource(commonnexus.FailureSourceWorker)
@@ -710,12 +727,18 @@ func (h *nexusHandler) convertOutcomeToNexusHandlerError(resp *matchingservice.D
 	case enumspb.NEXUS_HANDLER_ERROR_RETRY_BEHAVIOR_NON_RETRYABLE:
 		retryBehavior = nexus.HandlerErrorRetryBehaviorNonRetryable
 	}
+
+	nf := commonnexus.ProtoFailureToNexusFailure(resp.HandlerError.GetFailure())
 	handlerError := &nexus.HandlerError{
-		Type: nexus.HandlerErrorType(resp.HandlerError.GetErrorType()),
-		Cause: &nexus.FailureError{
-			Failure: commonnexus.ProtoFailureToNexusFailure(resp.HandlerError.GetFailure()),
-		},
+		Type:          nexus.HandlerErrorType(resp.HandlerError.GetErrorType()),
+		Message:       nf.Message,
 		RetryBehavior: retryBehavior,
+	}
+
+	if nf.Cause != nil {
+		handlerError.Cause = &nexus.FailureError{
+			Failure: *nf.Cause,
+		}
 	}
 
 	switch handlerError.Type {
