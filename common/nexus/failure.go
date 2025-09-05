@@ -161,7 +161,7 @@ func NexusFailureToAPIFailure(f nexus.Failure) (*failurepb.Failure, error) {
 			var se serializedHandlerError
 			err := json.Unmarshal(f.Details, &se)
 			if err != nil {
-				return nil, fmt.Errorf("failed to deserialize OperationError: %w", err)
+				return nil, fmt.Errorf("failed to deserialize HandlerError: %w", err)
 			}
 			var retryBehavior enumspb.NexusHandlerErrorRetryBehavior
 			if se.RetryableOverride == nil {
@@ -178,7 +178,7 @@ func NexusFailureToAPIFailure(f nexus.Failure) (*failurepb.Failure, error) {
 				},
 			}
 			if err := protojson.Unmarshal([]byte(se.EncodedAttributes), apiFailure.EncodedAttributes); err != nil {
-				return nil, fmt.Errorf("failed to deserialize OperationError attributes: %w", err)
+				return nil, fmt.Errorf("failed to deserialize HandlerError attributes: %w", err)
 			}
 			if f.Cause != nil {
 				apiFailure.Cause, err = NexusFailureToAPIFailure(*f.Cause)
