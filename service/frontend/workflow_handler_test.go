@@ -37,11 +37,13 @@ import (
 	"go.temporal.io/server/api/matchingservicemock/v1"
 	persistencespb "go.temporal.io/server/api/persistence/v1"
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
+	"go.temporal.io/server/chasm/lib/workflow"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/archiver"
 	"go.temporal.io/server/common/archiver/provider"
 	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/common/cluster"
+	"go.temporal.io/server/common/dynamicconfig"
 	dc "go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/headers"
 	"go.temporal.io/server/common/log"
@@ -49,6 +51,7 @@ import (
 	"go.temporal.io/server/common/payload"
 	"go.temporal.io/server/common/payloads"
 	"go.temporal.io/server/common/persistence"
+	"go.temporal.io/server/common/persistence/visibility"
 	"go.temporal.io/server/common/persistence/visibility/manager"
 	"go.temporal.io/server/common/persistence/visibility/store/elasticsearch"
 	"go.temporal.io/server/common/primitives"
@@ -166,6 +169,19 @@ func (s *WorkflowHandlerSuite) getWorkflowHandler(config *Config) *WorkflowHandl
 	s.mockVisibilityMgr.EXPECT().GetIndexName().Return(esIndexName).AnyTimes()
 	healthInterceptor := interceptor.NewHealthInterceptor()
 	healthInterceptor.SetHealthy(true)
+	saValidator := searchattribute.NewValidator(
+		s.mockSearchAttributesProvider,
+		s.mockSearchAttributesMapperProvider,
+		config.SearchAttributesNumberOfKeysLimit,
+		config.SearchAttributesSizeOfValueLimit,
+		config.SearchAttributesTotalSizeLimit,
+		s.mockVisibilityMgr,
+		visibility.AllowListForValidation(
+			s.mockVisibilityMgr.GetStoreNames(),
+			config.VisibilityAllowList,
+		),
+		config.SuppressErrorSetSystemSearchAttribute,
+	)
 	return NewWorkflowHandler(
 		config,
 		s.mockProducer,
@@ -184,6 +200,7 @@ func (s *WorkflowHandlerSuite) getWorkflowHandler(config *Config) *WorkflowHandl
 		s.mockResource.GetNamespaceRegistry(),
 		s.mockResource.GetSearchAttributesMapperProvider(),
 		s.mockResource.GetSearchAttributesProvider(),
+		saValidator,
 		s.mockResource.GetClusterMetadata(),
 		s.mockResource.GetArchivalMetadata(),
 		health.NewServer(),
@@ -194,6 +211,11 @@ func (s *WorkflowHandlerSuite) getWorkflowHandler(config *Config) *WorkflowHandl
 		true,
 		nil, // Not testing activity handler here
 		nil,
+		workflow.NewValidator(
+			workflow.NewConfig(dynamicconfig.NewNoopCollection()),
+			s.mockSearchAttributesMapperProvider,
+			saValidator,
+		),
 	)
 }
 
@@ -357,7 +379,7 @@ func (s *WorkflowHandlerSuite) TestStartWorkflowExecution_Failed_WorkflowIdNotSe
 	}
 	_, err := wh.StartWorkflowExecution(context.Background(), startWorkflowExecutionRequest)
 	s.Error(err)
-	s.Equal(errWorkflowIDNotSet, err)
+	s.Equal(workflow.ErrWorkflowIDNotSet, err)
 }
 
 func (s *WorkflowHandlerSuite) TestStartWorkflowExecution_Failed_WorkflowTypeNotSet() {
@@ -444,7 +466,7 @@ func (s *WorkflowHandlerSuite) TestStartWorkflowExecution_Failed_InvalidExecutio
 	_, err := wh.StartWorkflowExecution(context.Background(), startWorkflowExecutionRequest)
 	var invalidArg *serviceerror.InvalidArgument
 	s.ErrorAs(err, &invalidArg)
-	s.ErrorContains(err, errInvalidWorkflowExecutionTimeoutSeconds.Error())
+	s.ErrorContains(err, "An invalid WorkflowExecutionTimeoutSeconds is set on request")
 }
 
 func (s *WorkflowHandlerSuite) TestStartWorkflowExecution_Failed_InvalidRunTimeout() {
@@ -474,7 +496,7 @@ func (s *WorkflowHandlerSuite) TestStartWorkflowExecution_Failed_InvalidRunTimeo
 	_, err := wh.StartWorkflowExecution(context.Background(), startWorkflowExecutionRequest)
 	var invalidArg *serviceerror.InvalidArgument
 	s.ErrorAs(err, &invalidArg)
-	s.ErrorContains(err, errInvalidWorkflowRunTimeoutSeconds.Error())
+	s.ErrorContains(err, "An invalid WorkflowRunTimeoutSeconds is set on request")
 }
 
 func (s *WorkflowHandlerSuite) TestStartWorkflowExecution_EnsureNonNilRetryPolicyInitialized() {
@@ -556,7 +578,7 @@ func (s *WorkflowHandlerSuite) TestStartWorkflowExecution_Failed_InvalidTaskTime
 	_, err := wh.StartWorkflowExecution(context.Background(), startWorkflowExecutionRequest)
 	var invalidArg *serviceerror.InvalidArgument
 	s.ErrorAs(err, &invalidArg)
-	s.ErrorContains(err, errInvalidWorkflowTaskTimeoutSeconds.Error())
+	s.ErrorContains(err, "An invalid WorkflowTaskTimeoutSeconds is set on request")
 }
 
 func (s *WorkflowHandlerSuite) TestStartWorkflowExecution_Failed_CronAndStartDelaySet() {
@@ -587,7 +609,7 @@ func (s *WorkflowHandlerSuite) TestStartWorkflowExecution_Failed_CronAndStartDel
 		WorkflowStartDelay: durationpb.New(10 * time.Second),
 	}
 	_, err := wh.StartWorkflowExecution(context.Background(), startWorkflowExecutionRequest)
-	s.ErrorIs(err, errCronAndStartDelaySet)
+	s.ErrorIs(err, workflow.ErrCronAndStartDelaySet)
 }
 
 func (s *WorkflowHandlerSuite) TestStartWorkflowExecution_Failed_InvalidStartDelay() {
@@ -620,7 +642,7 @@ func (s *WorkflowHandlerSuite) TestStartWorkflowExecution_Failed_InvalidStartDel
 	_, err := wh.StartWorkflowExecution(context.Background(), startWorkflowExecutionRequest)
 	var invalidArg *serviceerror.InvalidArgument
 	s.ErrorAs(err, &invalidArg)
-	s.ErrorContains(err, errInvalidWorkflowStartDelaySeconds.Error())
+	s.ErrorContains(err, workflow.ErrInvalidWorkflowStartDelaySeconds.Error())
 }
 
 func (s *WorkflowHandlerSuite) TestStartWorkflowExecution_InvalidWorkflowIdReusePolicy_TerminateIfRunning() {
@@ -3679,7 +3701,7 @@ func (s *WorkflowHandlerSuite) TestExecuteMultiOperation() {
 			})
 
 			s.Nil(resp)
-			assertMultiOpsErr([]error{errWorkflowIDNotSet, errMultiOpAborted}, err)
+			assertMultiOpsErr([]error{workflow.ErrWorkflowIDNotSet, errMultiOpAborted}, err)
 		})
 
 		// unique to MultiOperation:

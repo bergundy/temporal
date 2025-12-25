@@ -6,19 +6,37 @@ import (
 	"google.golang.org/grpc"
 )
 
-type (
-	Library struct {
-		chasm.UnimplementedLibrary
+type ComponentOnlyLibrary struct {
+	chasm.UnimplementedLibrary
+}
 
-		handler *handler
+func (l *ComponentOnlyLibrary) Name() string {
+	return chasm.SchedulerLibraryName
+}
 
-		SchedulerIdleTaskExecutor        *SchedulerIdleTaskExecutor
-		GeneratorTaskExecutor            *GeneratorTaskExecutor
-		InvokerExecuteTaskExecutor       *InvokerExecuteTaskExecutor
-		InvokerProcessBufferTaskExecutor *InvokerProcessBufferTaskExecutor
-		BackfillerTaskExecutor           *BackfillerTaskExecutor
+func (l *ComponentOnlyLibrary) Components() []*chasm.RegistrableComponent {
+	return []*chasm.RegistrableComponent{
+		chasm.NewRegistrableComponent[*Scheduler](
+			chasm.SchedulerComponentName,
+			chasm.WithBusinessIDAlias("ScheduleId"),
+		),
+		chasm.NewRegistrableComponent[*Generator]("generator"),
+		chasm.NewRegistrableComponent[*Invoker]("invoker"),
+		chasm.NewRegistrableComponent[*Backfiller]("backfiller"),
 	}
-)
+}
+
+type Library struct {
+	ComponentOnlyLibrary
+
+	handler *handler
+
+	SchedulerIdleTaskExecutor        *SchedulerIdleTaskExecutor
+	GeneratorTaskExecutor            *GeneratorTaskExecutor
+	InvokerExecuteTaskExecutor       *InvokerExecuteTaskExecutor
+	InvokerProcessBufferTaskExecutor *InvokerProcessBufferTaskExecutor
+	BackfillerTaskExecutor           *BackfillerTaskExecutor
+}
 
 func NewLibrary(
 	handler *handler,
@@ -35,22 +53,6 @@ func NewLibrary(
 		InvokerExecuteTaskExecutor:       InvokerExecuteTaskExecutor,
 		InvokerProcessBufferTaskExecutor: InvokerProcessBufferTaskExecutor,
 		BackfillerTaskExecutor:           BackfillerTaskExecutor,
-	}
-}
-
-func (l *Library) Name() string {
-	return chasm.SchedulerLibraryName
-}
-
-func (l *Library) Components() []*chasm.RegistrableComponent {
-	return []*chasm.RegistrableComponent{
-		chasm.NewRegistrableComponent[*Scheduler](
-			chasm.SchedulerComponentName,
-			chasm.WithBusinessIDAlias("ScheduleId"),
-		),
-		chasm.NewRegistrableComponent[*Generator]("generator"),
-		chasm.NewRegistrableComponent[*Invoker]("invoker"),
-		chasm.NewRegistrableComponent[*Backfiller]("backfiller"),
 	}
 }
 
