@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package temporal.server.chasm.lib.updatabletimer.proto.v1;
+
+import "temporal/api/workflowservice/v1/request_response.proto";
+
+option go_package = "go.temporal.io/server/chasm/lib/updatabletimer/gen/updatabletimerpb;updatabletimerpb";
+
+message StartUpdatableTimerExecutionRequest {
+  string namespace_id = 1;
+  temporal.api.workflowservice.v1.StartUpdatableTimerExecutionRequest frontend_request = 2;
+}
+
+message StartUpdatableTimerExecutionResponse {
+  temporal.api.workflowservice.v1.StartUpdatableTimerExecutionResponse frontend_response = 1;
+}
+
+message UpdateUpdatableTimerExecutionRequest {
+  string namespace_id = 1;
+  temporal.api.workflowservice.v1.UpdateUpdatableTimerExecutionRequest frontend_request = 2;
+}
+
+message UpdateUpdatableTimerExecutionResponse {}
+
+message DescribeUpdatableTimerExecutionRequest {
+  string namespace_id = 1;
+  temporal.api.workflowservice.v1.DescribeUpdatableTimerExecutionRequest frontend_request = 2;
+}
+
+message DescribeUpdatableTimerExecutionResponse {
+  temporal.api.workflowservice.v1.DescribeUpdatableTimerExecutionResponse frontend_response = 1;
+}
+
+message PollUpdatableTimerExecutionRequest {
+  string namespace_id = 1;
+  temporal.api.workflowservice.v1.PollUpdatableTimerExecutionRequest frontend_request = 2;
+}
+
+message PollUpdatableTimerExecutionResponse {
+  temporal.api.workflowservice.v1.PollUpdatableTimerExecutionResponse frontend_response = 1;
+}
+
+message TerminateUpdatableTimerExecutionRequest {
+  string namespace_id = 1;
+  temporal.api.workflowservice.v1.TerminateUpdatableTimerExecutionRequest frontend_request = 2;
+}
+
+message TerminateUpdatableTimerExecutionResponse {}

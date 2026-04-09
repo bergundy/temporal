@@ -1,0 +1,36 @@
+syntax = "proto3";
+
+package temporal.server.chasm.lib.updatabletimer.proto.v1;
+
+import "chasm/lib/updatabletimer/proto/v1/request_response.proto";
+import "temporal/server/api/common/v1/api_category.proto";
+import "temporal/server/api/routing/v1/extension.proto";
+
+option go_package = "go.temporal.io/server/chasm/lib/updatabletimer/gen/updatabletimerpb;updatabletimerpb";
+
+service UpdatableTimerService {
+  rpc StartUpdatableTimerExecution(StartUpdatableTimerExecutionRequest) returns (StartUpdatableTimerExecutionResponse) {
+    option (temporal.server.api.routing.v1.routing).business_id = "frontend_request.timer_id";
+    option (temporal.server.api.common.v1.api_category).category = API_CATEGORY_STANDARD;
+  }
+
+  rpc UpdateUpdatableTimerExecution(UpdateUpdatableTimerExecutionRequest) returns (UpdateUpdatableTimerExecutionResponse) {
+    option (temporal.server.api.routing.v1.routing).business_id = "frontend_request.timer_id";
+    option (temporal.server.api.common.v1.api_category).category = API_CATEGORY_STANDARD;
+  }
+
+  rpc DescribeUpdatableTimerExecution(DescribeUpdatableTimerExecutionRequest) returns (DescribeUpdatableTimerExecutionResponse) {
+    option (temporal.server.api.routing.v1.routing).business_id = "frontend_request.timer_id";
+    option (temporal.server.api.common.v1.api_category).category = API_CATEGORY_STANDARD;
+  }
+
+  rpc PollUpdatableTimerExecution(PollUpdatableTimerExecutionRequest) returns (PollUpdatableTimerExecutionResponse) {
+    option (temporal.server.api.routing.v1.routing).business_id = "frontend_request.timer_id";
+    option (temporal.server.api.common.v1.api_category).category = API_CATEGORY_LONG_POLL;
+  }
+
+  rpc TerminateUpdatableTimerExecution(TerminateUpdatableTimerExecutionRequest) returns (TerminateUpdatableTimerExecutionResponse) {
+    option (temporal.server.api.routing.v1.routing).business_id = "frontend_request.timer_id";
+    option (temporal.server.api.common.v1.api_category).category = API_CATEGORY_STANDARD;
+  }
+}
