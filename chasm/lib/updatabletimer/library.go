@@ -29,21 +29,40 @@ func (l *componentOnlyLibrary) Name() string {
 }
 
 func (l *componentOnlyLibrary) Components() []*chasm.RegistrableComponent {
-	return nil
+	return []*chasm.RegistrableComponent{
+		chasm.NewRegistrableComponent[*UpdatableTimer](
+			componentName,
+			chasm.WithSearchAttributes(
+				StatusSearchAttribute,
+			),
+			chasm.WithBusinessIDAlias("TimerId"),
+		),
+	}
 }
 
 type library struct {
 	componentOnlyLibrary
-	handler *handler
+	handler              *handler
+	deadlineTaskHandler  *deadlineTaskHandler
 }
 
-func newLibrary(handler *handler) *library {
+func newLibrary(handler *handler, deadlineTaskHandler *deadlineTaskHandler) *library {
 	return &library{
 		componentOnlyLibrary: *newComponentOnlyLibrary(),
 		handler:              handler,
+		deadlineTaskHandler:  deadlineTaskHandler,
 	}
 }
 
 func (l *library) RegisterServices(server *grpc.Server) {
 	server.RegisterService(&updatabletimerpb.UpdatableTimerService_ServiceDesc, l.handler)
+}
+
+func (l *library) Tasks() []*chasm.RegistrableTask {
+	return []*chasm.RegistrableTask{
+		chasm.NewRegistrablePureTask(
+			"deadline",
+			l.deadlineTaskHandler,
+		),
+	}
 }

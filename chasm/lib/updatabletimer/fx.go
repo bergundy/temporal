@@ -10,6 +10,7 @@ var HistoryModule = fx.Module(
 	"updatabletimer-history",
 	fx.Provide(
 		ConfigProvider,
+		newDeadlineTaskHandler,
 		newHandler,
 		newLibrary,
 	),

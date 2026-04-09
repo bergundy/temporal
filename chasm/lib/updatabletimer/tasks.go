@@ -28,8 +28,8 @@ func (h *deadlineTaskHandler) Validate(
 
 // Execute fires the timer by applying the TransitionFired transition.
 func (h *deadlineTaskHandler) Execute(
-	timer *UpdatableTimer,
 	ctx chasm.MutableContext,
+	timer *UpdatableTimer,
 	_ chasm.TaskAttributes,
 	_ *updatabletimerpb.DeadlineTask,
 ) error {
