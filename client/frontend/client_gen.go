@@ -209,6 +209,16 @@ func (c *clientImpl) DescribeTaskQueue(
 	return c.client.DescribeTaskQueue(ctx, request, opts...)
 }
 
+func (c *clientImpl) DescribeUpdatableTimerExecution(
+	ctx context.Context,
+	request *workflowservice.DescribeUpdatableTimerExecutionRequest,
+	opts ...grpc.CallOption,
+) (*workflowservice.DescribeUpdatableTimerExecutionResponse, error) {
+	ctx, cancel := c.createContext(ctx)
+	defer cancel()
+	return c.client.DescribeUpdatableTimerExecution(ctx, request, opts...)
+}
+
 func (c *clientImpl) DescribeWorker(
 	ctx context.Context,
 	request *workflowservice.DescribeWorkerRequest,
@@ -479,6 +489,16 @@ func (c *clientImpl) ListTaskQueuePartitions(
 	return c.client.ListTaskQueuePartitions(ctx, request, opts...)
 }
 
+func (c *clientImpl) ListUpdatableTimerExecutions(
+	ctx context.Context,
+	request *workflowservice.ListUpdatableTimerExecutionsRequest,
+	opts ...grpc.CallOption,
+) (*workflowservice.ListUpdatableTimerExecutionsResponse, error) {
+	ctx, cancel := c.createContext(ctx)
+	defer cancel()
+	return c.client.ListUpdatableTimerExecutions(ctx, request, opts...)
+}
+
 func (c *clientImpl) ListWorkerDeployments(
 	ctx context.Context,
 	request *workflowservice.ListWorkerDeploymentsRequest,
@@ -577,6 +597,16 @@ func (c *clientImpl) PollNexusTaskQueue(
 	ctx, cancel := c.createContext(ctx)
 	defer cancel()
 	return c.client.PollNexusTaskQueue(ctx, request, opts...)
+}
+
+func (c *clientImpl) PollUpdatableTimerExecution(
+	ctx context.Context,
+	request *workflowservice.PollUpdatableTimerExecutionRequest,
+	opts ...grpc.CallOption,
+) (*workflowservice.PollUpdatableTimerExecutionResponse, error) {
+	ctx, cancel := c.createContext(ctx)
+	defer cancel()
+	return c.client.PollUpdatableTimerExecution(ctx, request, opts...)
 }
 
 func (c *clientImpl) PollWorkflowExecutionUpdate(
@@ -909,6 +939,16 @@ func (c *clientImpl) StartBatchOperation(
 	return c.client.StartBatchOperation(ctx, request, opts...)
 }
 
+func (c *clientImpl) StartUpdatableTimerExecution(
+	ctx context.Context,
+	request *workflowservice.StartUpdatableTimerExecutionRequest,
+	opts ...grpc.CallOption,
+) (*workflowservice.StartUpdatableTimerExecutionResponse, error) {
+	ctx, cancel := c.createContext(ctx)
+	defer cancel()
+	return c.client.StartUpdatableTimerExecution(ctx, request, opts...)
+}
+
 func (c *clientImpl) StartWorkflowExecution(
 	ctx context.Context,
 	request *workflowservice.StartWorkflowExecutionRequest,
@@ -937,6 +977,16 @@ func (c *clientImpl) TerminateActivityExecution(
 	ctx, cancel := c.createContext(ctx)
 	defer cancel()
 	return c.client.TerminateActivityExecution(ctx, request, opts...)
+}
+
+func (c *clientImpl) TerminateUpdatableTimerExecution(
+	ctx context.Context,
+	request *workflowservice.TerminateUpdatableTimerExecutionRequest,
+	opts ...grpc.CallOption,
+) (*workflowservice.TerminateUpdatableTimerExecutionResponse, error) {
+	ctx, cancel := c.createContext(ctx)
+	defer cancel()
+	return c.client.TerminateUpdatableTimerExecution(ctx, request, opts...)
 }
 
 func (c *clientImpl) TerminateWorkflowExecution(
@@ -1017,6 +1067,16 @@ func (c *clientImpl) UpdateTaskQueueConfig(
 	ctx, cancel := c.createContext(ctx)
 	defer cancel()
 	return c.client.UpdateTaskQueueConfig(ctx, request, opts...)
+}
+
+func (c *clientImpl) UpdateUpdatableTimerExecution(
+	ctx context.Context,
+	request *workflowservice.UpdateUpdatableTimerExecutionRequest,
+	opts ...grpc.CallOption,
+) (*workflowservice.UpdateUpdatableTimerExecutionResponse, error) {
+	ctx, cancel := c.createContext(ctx)
+	defer cancel()
+	return c.client.UpdateUpdatableTimerExecution(ctx, request, opts...)
 }
 
 func (c *clientImpl) UpdateWorkerBuildIdCompatibility(

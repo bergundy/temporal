@@ -289,6 +289,20 @@ func (c *metricClient) DescribeTaskQueue(
 	return c.client.DescribeTaskQueue(ctx, request, opts...)
 }
 
+func (c *metricClient) DescribeUpdatableTimerExecution(
+	ctx context.Context,
+	request *workflowservice.DescribeUpdatableTimerExecutionRequest,
+	opts ...grpc.CallOption,
+) (_ *workflowservice.DescribeUpdatableTimerExecutionResponse, retError error) {
+
+	metricsHandler, startTime := c.startMetricsRecording(ctx, "FrontendClientDescribeUpdatableTimerExecution")
+	defer func() {
+		c.finishMetricsRecording(metricsHandler, startTime, retError)
+	}()
+
+	return c.client.DescribeUpdatableTimerExecution(ctx, request, opts...)
+}
+
 func (c *metricClient) DescribeWorker(
 	ctx context.Context,
 	request *workflowservice.DescribeWorkerRequest,
@@ -667,6 +681,20 @@ func (c *metricClient) ListTaskQueuePartitions(
 	return c.client.ListTaskQueuePartitions(ctx, request, opts...)
 }
 
+func (c *metricClient) ListUpdatableTimerExecutions(
+	ctx context.Context,
+	request *workflowservice.ListUpdatableTimerExecutionsRequest,
+	opts ...grpc.CallOption,
+) (_ *workflowservice.ListUpdatableTimerExecutionsResponse, retError error) {
+
+	metricsHandler, startTime := c.startMetricsRecording(ctx, "FrontendClientListUpdatableTimerExecutions")
+	defer func() {
+		c.finishMetricsRecording(metricsHandler, startTime, retError)
+	}()
+
+	return c.client.ListUpdatableTimerExecutions(ctx, request, opts...)
+}
+
 func (c *metricClient) ListWorkerDeployments(
 	ctx context.Context,
 	request *workflowservice.ListWorkerDeploymentsRequest,
@@ -805,6 +833,20 @@ func (c *metricClient) PollNexusTaskQueue(
 	}()
 
 	return c.client.PollNexusTaskQueue(ctx, request, opts...)
+}
+
+func (c *metricClient) PollUpdatableTimerExecution(
+	ctx context.Context,
+	request *workflowservice.PollUpdatableTimerExecutionRequest,
+	opts ...grpc.CallOption,
+) (_ *workflowservice.PollUpdatableTimerExecutionResponse, retError error) {
+
+	metricsHandler, startTime := c.startMetricsRecording(ctx, "FrontendClientPollUpdatableTimerExecution")
+	defer func() {
+		c.finishMetricsRecording(metricsHandler, startTime, retError)
+	}()
+
+	return c.client.PollUpdatableTimerExecution(ctx, request, opts...)
 }
 
 func (c *metricClient) PollWorkflowExecutionUpdate(
@@ -1269,6 +1311,20 @@ func (c *metricClient) StartBatchOperation(
 	return c.client.StartBatchOperation(ctx, request, opts...)
 }
 
+func (c *metricClient) StartUpdatableTimerExecution(
+	ctx context.Context,
+	request *workflowservice.StartUpdatableTimerExecutionRequest,
+	opts ...grpc.CallOption,
+) (_ *workflowservice.StartUpdatableTimerExecutionResponse, retError error) {
+
+	metricsHandler, startTime := c.startMetricsRecording(ctx, "FrontendClientStartUpdatableTimerExecution")
+	defer func() {
+		c.finishMetricsRecording(metricsHandler, startTime, retError)
+	}()
+
+	return c.client.StartUpdatableTimerExecution(ctx, request, opts...)
+}
+
 func (c *metricClient) StartWorkflowExecution(
 	ctx context.Context,
 	request *workflowservice.StartWorkflowExecutionRequest,
@@ -1309,6 +1365,20 @@ func (c *metricClient) TerminateActivityExecution(
 	}()
 
 	return c.client.TerminateActivityExecution(ctx, request, opts...)
+}
+
+func (c *metricClient) TerminateUpdatableTimerExecution(
+	ctx context.Context,
+	request *workflowservice.TerminateUpdatableTimerExecutionRequest,
+	opts ...grpc.CallOption,
+) (_ *workflowservice.TerminateUpdatableTimerExecutionResponse, retError error) {
+
+	metricsHandler, startTime := c.startMetricsRecording(ctx, "FrontendClientTerminateUpdatableTimerExecution")
+	defer func() {
+		c.finishMetricsRecording(metricsHandler, startTime, retError)
+	}()
+
+	return c.client.TerminateUpdatableTimerExecution(ctx, request, opts...)
 }
 
 func (c *metricClient) TerminateWorkflowExecution(
@@ -1421,6 +1491,20 @@ func (c *metricClient) UpdateTaskQueueConfig(
 	}()
 
 	return c.client.UpdateTaskQueueConfig(ctx, request, opts...)
+}
+
+func (c *metricClient) UpdateUpdatableTimerExecution(
+	ctx context.Context,
+	request *workflowservice.UpdateUpdatableTimerExecutionRequest,
+	opts ...grpc.CallOption,
+) (_ *workflowservice.UpdateUpdatableTimerExecutionResponse, retError error) {
+
+	metricsHandler, startTime := c.startMetricsRecording(ctx, "FrontendClientUpdateUpdatableTimerExecution")
+	defer func() {
+		c.finishMetricsRecording(metricsHandler, startTime, retError)
+	}()
+
+	return c.client.UpdateUpdatableTimerExecution(ctx, request, opts...)
 }
 
 func (c *metricClient) UpdateWorkerBuildIdCompatibility(

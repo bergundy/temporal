@@ -311,6 +311,21 @@ func (c *retryableClient) DescribeTaskQueue(
 	return resp, err
 }
 
+func (c *retryableClient) DescribeUpdatableTimerExecution(
+	ctx context.Context,
+	request *workflowservice.DescribeUpdatableTimerExecutionRequest,
+	opts ...grpc.CallOption,
+) (*workflowservice.DescribeUpdatableTimerExecutionResponse, error) {
+	var resp *workflowservice.DescribeUpdatableTimerExecutionResponse
+	op := func(ctx context.Context) error {
+		var err error
+		resp, err = c.client.DescribeUpdatableTimerExecution(ctx, request, opts...)
+		return err
+	}
+	err := backoff.ThrottleRetryContext(ctx, op, c.policy, c.isRetryable)
+	return resp, err
+}
+
 func (c *retryableClient) DescribeWorker(
 	ctx context.Context,
 	request *workflowservice.DescribeWorkerRequest,
@@ -716,6 +731,21 @@ func (c *retryableClient) ListTaskQueuePartitions(
 	return resp, err
 }
 
+func (c *retryableClient) ListUpdatableTimerExecutions(
+	ctx context.Context,
+	request *workflowservice.ListUpdatableTimerExecutionsRequest,
+	opts ...grpc.CallOption,
+) (*workflowservice.ListUpdatableTimerExecutionsResponse, error) {
+	var resp *workflowservice.ListUpdatableTimerExecutionsResponse
+	op := func(ctx context.Context) error {
+		var err error
+		resp, err = c.client.ListUpdatableTimerExecutions(ctx, request, opts...)
+		return err
+	}
+	err := backoff.ThrottleRetryContext(ctx, op, c.policy, c.isRetryable)
+	return resp, err
+}
+
 func (c *retryableClient) ListWorkerDeployments(
 	ctx context.Context,
 	request *workflowservice.ListWorkerDeploymentsRequest,
@@ -860,6 +890,21 @@ func (c *retryableClient) PollNexusTaskQueue(
 	op := func(ctx context.Context) error {
 		var err error
 		resp, err = c.client.PollNexusTaskQueue(ctx, request, opts...)
+		return err
+	}
+	err := backoff.ThrottleRetryContext(ctx, op, c.policy, c.isRetryable)
+	return resp, err
+}
+
+func (c *retryableClient) PollUpdatableTimerExecution(
+	ctx context.Context,
+	request *workflowservice.PollUpdatableTimerExecutionRequest,
+	opts ...grpc.CallOption,
+) (*workflowservice.PollUpdatableTimerExecutionResponse, error) {
+	var resp *workflowservice.PollUpdatableTimerExecutionResponse
+	op := func(ctx context.Context) error {
+		var err error
+		resp, err = c.client.PollUpdatableTimerExecution(ctx, request, opts...)
 		return err
 	}
 	err := backoff.ThrottleRetryContext(ctx, op, c.policy, c.isRetryable)
@@ -1361,6 +1406,21 @@ func (c *retryableClient) StartBatchOperation(
 	return resp, err
 }
 
+func (c *retryableClient) StartUpdatableTimerExecution(
+	ctx context.Context,
+	request *workflowservice.StartUpdatableTimerExecutionRequest,
+	opts ...grpc.CallOption,
+) (*workflowservice.StartUpdatableTimerExecutionResponse, error) {
+	var resp *workflowservice.StartUpdatableTimerExecutionResponse
+	op := func(ctx context.Context) error {
+		var err error
+		resp, err = c.client.StartUpdatableTimerExecution(ctx, request, opts...)
+		return err
+	}
+	err := backoff.ThrottleRetryContext(ctx, op, c.policy, c.isRetryable)
+	return resp, err
+}
+
 func (c *retryableClient) StartWorkflowExecution(
 	ctx context.Context,
 	request *workflowservice.StartWorkflowExecutionRequest,
@@ -1400,6 +1460,21 @@ func (c *retryableClient) TerminateActivityExecution(
 	op := func(ctx context.Context) error {
 		var err error
 		resp, err = c.client.TerminateActivityExecution(ctx, request, opts...)
+		return err
+	}
+	err := backoff.ThrottleRetryContext(ctx, op, c.policy, c.isRetryable)
+	return resp, err
+}
+
+func (c *retryableClient) TerminateUpdatableTimerExecution(
+	ctx context.Context,
+	request *workflowservice.TerminateUpdatableTimerExecutionRequest,
+	opts ...grpc.CallOption,
+) (*workflowservice.TerminateUpdatableTimerExecutionResponse, error) {
+	var resp *workflowservice.TerminateUpdatableTimerExecutionResponse
+	op := func(ctx context.Context) error {
+		var err error
+		resp, err = c.client.TerminateUpdatableTimerExecution(ctx, request, opts...)
 		return err
 	}
 	err := backoff.ThrottleRetryContext(ctx, op, c.policy, c.isRetryable)
@@ -1520,6 +1595,21 @@ func (c *retryableClient) UpdateTaskQueueConfig(
 	op := func(ctx context.Context) error {
 		var err error
 		resp, err = c.client.UpdateTaskQueueConfig(ctx, request, opts...)
+		return err
+	}
+	err := backoff.ThrottleRetryContext(ctx, op, c.policy, c.isRetryable)
+	return resp, err
+}
+
+func (c *retryableClient) UpdateUpdatableTimerExecution(
+	ctx context.Context,
+	request *workflowservice.UpdateUpdatableTimerExecutionRequest,
+	opts ...grpc.CallOption,
+) (*workflowservice.UpdateUpdatableTimerExecutionResponse, error) {
+	var resp *workflowservice.UpdateUpdatableTimerExecutionResponse
+	op := func(ctx context.Context) error {
+		var err error
+		resp, err = c.client.UpdateUpdatableTimerExecution(ctx, request, opts...)
 		return err
 	}
 	err := backoff.ThrottleRetryContext(ctx, op, c.policy, c.isRetryable)

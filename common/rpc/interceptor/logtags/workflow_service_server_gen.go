@@ -100,6 +100,14 @@ func (wt *WorkflowTags) extractFromWorkflowServiceServerMessage(message any) []t
 		return nil
 	case *workflowservice.DescribeTaskQueueResponse:
 		return nil
+	case *workflowservice.DescribeUpdatableTimerExecutionRequest:
+		return []tag.Tag{
+			tag.WorkflowRunID(r.GetRunId()),
+		}
+	case *workflowservice.DescribeUpdatableTimerExecutionResponse:
+		return []tag.Tag{
+			tag.WorkflowRunID(r.GetRunId()),
+		}
 	case *workflowservice.DescribeWorkerRequest:
 		return nil
 	case *workflowservice.DescribeWorkerResponse:
@@ -217,6 +225,10 @@ func (wt *WorkflowTags) extractFromWorkflowServiceServerMessage(message any) []t
 		return nil
 	case *workflowservice.ListTaskQueuePartitionsResponse:
 		return nil
+	case *workflowservice.ListUpdatableTimerExecutionsRequest:
+		return nil
+	case *workflowservice.ListUpdatableTimerExecutionsResponse:
+		return nil
 	case *workflowservice.ListWorkerDeploymentsRequest:
 		return nil
 	case *workflowservice.ListWorkerDeploymentsResponse:
@@ -271,6 +283,14 @@ func (wt *WorkflowTags) extractFromWorkflowServiceServerMessage(message any) []t
 		return nil
 	case *workflowservice.PollNexusTaskQueueResponse:
 		return wt.fromTaskToken(r.GetTaskToken())
+	case *workflowservice.PollUpdatableTimerExecutionRequest:
+		return []tag.Tag{
+			tag.WorkflowRunID(r.GetRunId()),
+		}
+	case *workflowservice.PollUpdatableTimerExecutionResponse:
+		return []tag.Tag{
+			tag.WorkflowRunID(r.GetRunId()),
+		}
 	case *workflowservice.PollWorkflowExecutionUpdateRequest:
 		return []tag.Tag{
 			tag.WorkflowID(r.GetUpdateRef().GetWorkflowExecution().GetWorkflowId()),
@@ -459,6 +479,12 @@ func (wt *WorkflowTags) extractFromWorkflowServiceServerMessage(message any) []t
 		return nil
 	case *workflowservice.StartBatchOperationResponse:
 		return nil
+	case *workflowservice.StartUpdatableTimerExecutionRequest:
+		return nil
+	case *workflowservice.StartUpdatableTimerExecutionResponse:
+		return []tag.Tag{
+			tag.WorkflowRunID(r.GetRunId()),
+		}
 	case *workflowservice.StartWorkflowExecutionRequest:
 		return []tag.Tag{
 			tag.WorkflowID(r.GetWorkflowId()),
@@ -477,6 +503,12 @@ func (wt *WorkflowTags) extractFromWorkflowServiceServerMessage(message any) []t
 			tag.ChasmRunID(r.GetRunId()),
 		}
 	case *workflowservice.TerminateActivityExecutionResponse:
+		return nil
+	case *workflowservice.TerminateUpdatableTimerExecutionRequest:
+		return []tag.Tag{
+			tag.WorkflowRunID(r.GetRunId()),
+		}
+	case *workflowservice.TerminateUpdatableTimerExecutionResponse:
 		return nil
 	case *workflowservice.TerminateWorkflowExecutionRequest:
 		return []tag.Tag{
@@ -524,6 +556,12 @@ func (wt *WorkflowTags) extractFromWorkflowServiceServerMessage(message any) []t
 	case *workflowservice.UpdateTaskQueueConfigRequest:
 		return nil
 	case *workflowservice.UpdateTaskQueueConfigResponse:
+		return nil
+	case *workflowservice.UpdateUpdatableTimerExecutionRequest:
+		return []tag.Tag{
+			tag.WorkflowRunID(r.GetRunId()),
+		}
+	case *workflowservice.UpdateUpdatableTimerExecutionResponse:
 		return nil
 	case *workflowservice.UpdateWorkerBuildIdCompatibilityRequest:
 		return nil
