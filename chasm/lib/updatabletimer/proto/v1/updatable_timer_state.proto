@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package temporal.server.chasm.lib.updatabletimer.proto.v1;
+
+import "google/protobuf/timestamp.proto";
+import "temporal/api/enums/v1/updatable_timer.proto";
+
+option go_package = "go.temporal.io/server/chasm/lib/updatabletimer/gen/updatabletimerpb;updatabletimerpb";
+
+message UpdatableTimerState {
+  // Current status of the timer.
+  temporal.api.enums.v1.UpdatableTimerExecutionStatus status = 1;
+
+  // The current deadline. Updated on each UpdateUpdatableTimerExecution call.
+  google.protobuf.Timestamp deadline = 2;
+
+  // The original deadline set at creation time.
+  google.protobuf.Timestamp original_deadline = 3;
+
+  // Time the timer was created.
+  google.protobuf.Timestamp create_time = 4;
+
+  // Identity of the caller who terminated the timer.
+  string terminate_identity = 5;
+
+  // Request ID of the termination request, used for idempotency.
+  string terminate_request_id = 6;
+
+  // An incremental version number used to validate deadline tasks.
+  // Incremented each time the deadline changes (start or update).
+  int32 stamp = 7;
+}

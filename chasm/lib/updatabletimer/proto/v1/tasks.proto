@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package temporal.server.chasm.lib.updatabletimer.proto.v1;
+
+option go_package = "go.temporal.io/server/chasm/lib/updatabletimer/gen/updatabletimerpb;updatabletimerpb";
+
+// DeadlineTask fires the timer when the deadline is reached.
+message DeadlineTask {
+  // The stamp at the time this task was created. Used for task validation — if the stamp
+  // has changed (due to an UpdateUpdatableTimerExecution), this task is stale.
+  int32 stamp = 1;
+}
