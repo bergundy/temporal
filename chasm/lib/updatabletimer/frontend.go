@@ -4,12 +4,18 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	commonpb "go.temporal.io/api/common/v1"
+	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
+	updatabletimerapi "go.temporal.io/api/updatabletimer/v1"
 	"go.temporal.io/api/workflowservice/v1"
+	"go.temporal.io/server/chasm"
 	updatabletimerpb "go.temporal.io/server/chasm/lib/updatabletimer/gen/updatabletimerpb/v1"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/namespace"
+	"google.golang.org/protobuf/types/known/emptypb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type UpdatableTimerFrontendHandler interface {
@@ -159,13 +165,50 @@ func (h *frontendHandler) TerminateUpdatableTimerExecution(
 }
 
 func (h *frontendHandler) ListUpdatableTimerExecutions(
-	_ context.Context,
+	ctx context.Context,
 	req *workflowservice.ListUpdatableTimerExecutionsRequest,
 ) (*workflowservice.ListUpdatableTimerExecutionsResponse, error) {
 	if !h.config.Enabled(req.GetNamespace()) {
 		return nil, ErrUpdatableTimerDisabled
 	}
-	return nil, serviceerror.NewUnimplemented("updatable timer list not yet implemented")
+
+	pageSize := req.GetPageSize()
+	if maxPageSize := int32(h.config.VisibilityMaxPageSize(req.GetNamespace())); pageSize <= 0 || pageSize > maxPageSize {
+		pageSize = maxPageSize
+	}
+
+	resp, err := chasm.ListExecutions[*UpdatableTimer, *emptypb.Empty](ctx, &chasm.ListExecutionsRequest{
+		NamespaceName: req.GetNamespace(),
+		PageSize:      int(pageSize),
+		NextPageToken: req.GetNextPageToken(),
+		Query:         req.GetQuery(),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	executions := make([]*updatabletimerapi.UpdatableTimerExecutionListInfo, 0, len(resp.Executions))
+	for _, exec := range resp.Executions {
+		statusStr, _ := chasm.SearchAttributeValue(exec.ChasmSearchAttributes, StatusSearchAttribute)
+		status, _ := enumspb.UpdatableTimerExecutionStatusFromString(statusStr)
+
+		info := &updatabletimerapi.UpdatableTimerExecutionListInfo{
+			TimerId:          exec.BusinessID,
+			RunId:            exec.RunID,
+			Status:           status,
+			CreateTime:       timestamppb.New(exec.StartTime),
+			SearchAttributes: &commonpb.SearchAttributes{IndexedFields: exec.CustomSearchAttributes},
+		}
+		if !exec.CloseTime.IsZero() {
+			info.CloseTime = timestamppb.New(exec.CloseTime)
+		}
+		executions = append(executions, info)
+	}
+
+	return &workflowservice.ListUpdatableTimerExecutionsResponse{
+		Executions:    executions,
+		NextPageToken: resp.NextPageToken,
+	}, nil
 }
 
 func validateRunID(runID string) error {
