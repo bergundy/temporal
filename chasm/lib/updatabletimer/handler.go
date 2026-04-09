@@ -67,6 +67,10 @@ func (h *handler) StartUpdatableTimerExecution(
 		chasm.WithBusinessIDPolicy(chasm.BusinessIDReusePolicyRejectDuplicate, chasm.BusinessIDConflictPolicyFail),
 	)
 	if err != nil {
+		var alreadyStartedErr *chasm.ExecutionAlreadyStartedError
+		if errors.As(err, &alreadyStartedErr) {
+			return nil, serviceerror.NewUpdatableTimerExecutionAlreadyStarted("updatable timer execution already started", alreadyStartedErr.CurrentRequestID, alreadyStartedErr.CurrentRunID)
+		}
 		return nil, err
 	}
 
