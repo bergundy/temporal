@@ -36,6 +36,7 @@ import (
 	taskqueuespb "go.temporal.io/server/api/taskqueue/v1"
 	"go.temporal.io/server/chasm"
 	"go.temporal.io/server/chasm/lib/activity"
+	"go.temporal.io/server/chasm/lib/updatabletimer"
 	chasmscheduler "go.temporal.io/server/chasm/lib/scheduler"
 	"go.temporal.io/server/chasm/lib/scheduler/gen/schedulerpb/v1"
 	"go.temporal.io/server/client/frontend"
@@ -114,6 +115,7 @@ type (
 	WorkflowHandler struct {
 		workflowservice.UnsafeWorkflowServiceServer
 		activity.FrontendHandler
+		updatabletimer.UpdatableTimerFrontendHandler
 
 		status int32
 
@@ -321,11 +323,13 @@ func NewWorkflowHandler(
 	scheduleSpecBuilder *scheduler.SpecBuilder,
 	httpEnabled bool,
 	activityHandler activity.FrontendHandler,
+	updatableTimerHandler updatabletimer.UpdatableTimerFrontendHandler,
 	registry *chasm.Registry,
 	workerDeploymentReadRateLimiter quotas.RequestRateLimiter,
 ) *WorkflowHandler {
 	handler := &WorkflowHandler{
-		FrontendHandler: activityHandler,
+		FrontendHandler:               activityHandler,
+		UpdatableTimerFrontendHandler: updatableTimerHandler,
 		status:          common.DaemonStatusInitialized,
 		config:          config,
 		tokenSerializer: tasktoken.NewSerializer(),
