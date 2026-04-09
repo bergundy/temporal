@@ -636,3 +636,77 @@ func (s *updatableTimerTestSuite) TestDeadlineFired() {
 	require.NotNil(t, info.GetCloseTime())
 	require.NotNil(t, descResp.GetOutcome().GetFired())
 }
+
+func (s *updatableTimerTestSuite) TestList() {
+	t := s.T()
+
+	t.Run("ListTimers", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+		defer cancel()
+
+		prefix := testcore.RandomizeStr("list")
+		timerID1 := prefix + "-timer-1"
+		timerID2 := prefix + "-timer-2"
+		deadline := timestamppb.New(time.Now().Add(1 * time.Hour))
+
+		_, err := s.startTimer(ctx, timerID1, deadline)
+		require.NoError(t, err)
+		_, err = s.startTimer(ctx, timerID2, deadline)
+		require.NoError(t, err)
+
+		// Visibility is eventually consistent — poll until both are listed.
+		var listResp *workflowservice.ListUpdatableTimerExecutionsResponse
+		require.Eventually(t, func() bool {
+			listResp, err = s.FrontendClient().ListUpdatableTimerExecutions(ctx, &workflowservice.ListUpdatableTimerExecutionsRequest{
+				Namespace: s.Namespace().String(),
+				Query:     "TimerId STARTS_WITH '" + prefix + "'",
+			})
+			return err == nil && len(listResp.GetExecutions()) == 2
+		}, 10*time.Second, 200*time.Millisecond)
+
+		for _, exec := range listResp.GetExecutions() {
+			require.Contains(t, []string{timerID1, timerID2}, exec.GetTimerId())
+			require.NotEmpty(t, exec.GetRunId())
+			require.Equal(t, enumspb.UPDATABLE_TIMER_EXECUTION_STATUS_RUNNING, exec.GetStatus())
+			require.False(t, exec.GetCreateTime().AsTime().IsZero())
+			require.Nil(t, exec.GetCloseTime())
+		}
+	})
+
+	t.Run("FilterByStatus", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+		defer cancel()
+
+		prefix := testcore.RandomizeStr("filter")
+		runningTimerID := prefix + "-running"
+		terminatedTimerID := prefix + "-terminated"
+		deadline := timestamppb.New(time.Now().Add(1 * time.Hour))
+
+		_, err := s.startTimer(ctx, runningTimerID, deadline)
+		require.NoError(t, err)
+
+		termStartResp, err := s.startTimer(ctx, terminatedTimerID, deadline)
+		require.NoError(t, err)
+
+		_, err = s.FrontendClient().TerminateUpdatableTimerExecution(ctx, &workflowservice.TerminateUpdatableTimerExecutionRequest{
+			Namespace: s.Namespace().String(),
+			TimerId:   terminatedTimerID,
+			RunId:     termStartResp.GetRunId(),
+			Reason:    "test",
+		})
+		require.NoError(t, err)
+
+		// Wait for visibility to reflect both timers, then filter.
+		var listResp *workflowservice.ListUpdatableTimerExecutionsResponse
+		require.Eventually(t, func() bool {
+			listResp, err = s.FrontendClient().ListUpdatableTimerExecutions(ctx, &workflowservice.ListUpdatableTimerExecutionsRequest{
+				Namespace: s.Namespace().String(),
+				Query:     "TimerId STARTS_WITH '" + prefix + "' AND ExecutionStatus = 'Running'",
+			})
+			return err == nil && len(listResp.GetExecutions()) == 1
+		}, 10*time.Second, 200*time.Millisecond)
+
+		require.Equal(t, runningTimerID, listResp.GetExecutions()[0].GetTimerId())
+		require.Equal(t, enumspb.UPDATABLE_TIMER_EXECUTION_STATUS_RUNNING, listResp.GetExecutions()[0].GetStatus())
+	})
+}
