@@ -221,3 +221,418 @@ func (s *updatableTimerTestSuite) TestDescribe() {
 		require.ErrorAs(t, err, &notFoundErr)
 	})
 }
+
+func (s *updatableTimerTestSuite) TestUpdate() {
+	t := s.T()
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	t.Run("BasicUpdate", func(t *testing.T) {
+		timerID := testcore.RandomizeStr(t.Name())
+		originalDeadline := timestamppb.New(time.Now().Add(1 * time.Hour))
+
+		startResp, err := s.startTimer(ctx, timerID, originalDeadline)
+		require.NoError(t, err)
+
+		newDeadline := timestamppb.New(time.Now().Add(2 * time.Hour))
+		_, err = s.FrontendClient().UpdateUpdatableTimerExecution(ctx, &workflowservice.UpdateUpdatableTimerExecutionRequest{
+			Namespace: s.Namespace().String(),
+			TimerId:   timerID,
+			RunId:     startResp.GetRunId(),
+			Deadline:  newDeadline,
+		})
+		require.NoError(t, err)
+
+		descResp, err := s.describeTimer(ctx, timerID, startResp.GetRunId())
+		require.NoError(t, err)
+
+		info := descResp.GetInfo()
+		require.Equal(t, newDeadline.AsTime().Unix(), info.GetDeadline().AsTime().Unix())
+		require.Equal(t, originalDeadline.AsTime().Unix(), info.GetOriginalDeadline().AsTime().Unix())
+		require.Equal(t, enumspb.UPDATABLE_TIMER_EXECUTION_STATUS_RUNNING, info.GetStatus())
+	})
+
+	t.Run("UpdateShortensDeadlineUnblocksPoll", func(t *testing.T) {
+		longCtx, longCancel := context.WithTimeout(t.Context(), 30*time.Second)
+		defer longCancel()
+
+		timerID := testcore.RandomizeStr(t.Name())
+		farDeadline := timestamppb.New(time.Now().Add(1 * time.Hour))
+
+		startResp, err := s.startTimer(longCtx, timerID, farDeadline)
+		require.NoError(t, err)
+
+		pollDone := make(chan struct{})
+		var pollResp *workflowservice.PollUpdatableTimerExecutionResponse
+		var pollErr error
+		go func() {
+			defer close(pollDone)
+			pollResp, pollErr = s.FrontendClient().PollUpdatableTimerExecution(longCtx, &workflowservice.PollUpdatableTimerExecutionRequest{
+				Namespace: s.Namespace().String(),
+				TimerId:   timerID,
+				RunId:     startResp.GetRunId(),
+			})
+		}()
+
+		shortDeadline := timestamppb.New(time.Now().Add(-1 * time.Second))
+		_, err = s.FrontendClient().UpdateUpdatableTimerExecution(longCtx, &workflowservice.UpdateUpdatableTimerExecutionRequest{
+			Namespace: s.Namespace().String(),
+			TimerId:   timerID,
+			RunId:     startResp.GetRunId(),
+			Deadline:  shortDeadline,
+		})
+		require.NoError(t, err)
+
+		select {
+		case <-pollDone:
+			require.NoError(t, pollErr)
+			require.NotNil(t, pollResp.GetOutcome().GetFired())
+			require.Equal(t, startResp.GetRunId(), pollResp.GetRunId())
+		case <-longCtx.Done():
+			t.Fatal("PollUpdatableTimerExecution timed out waiting for fired outcome")
+		}
+	})
+
+	t.Run("UpdateTriggersDescribeLongPoll", func(t *testing.T) {
+		longCtx, longCancel := context.WithTimeout(t.Context(), 30*time.Second)
+		defer longCancel()
+
+		timerID := testcore.RandomizeStr(t.Name())
+		originalDeadline := timestamppb.New(time.Now().Add(1 * time.Hour))
+
+		startResp, err := s.startTimer(longCtx, timerID, originalDeadline)
+		require.NoError(t, err)
+
+		descResp1, err := s.describeTimer(longCtx, timerID, startResp.GetRunId())
+		require.NoError(t, err)
+		require.NotEmpty(t, descResp1.GetLongPollToken())
+
+		describeDone := make(chan struct{})
+		var descResp2 *workflowservice.DescribeUpdatableTimerExecutionResponse
+		var descErr error
+		go func() {
+			defer close(describeDone)
+			descResp2, descErr = s.FrontendClient().DescribeUpdatableTimerExecution(longCtx, &workflowservice.DescribeUpdatableTimerExecutionRequest{
+				Namespace:     s.Namespace().String(),
+				TimerId:       timerID,
+				RunId:         startResp.GetRunId(),
+				LongPollToken: descResp1.GetLongPollToken(),
+			})
+		}()
+
+		newDeadline := timestamppb.New(time.Now().Add(2 * time.Hour))
+		_, err = s.FrontendClient().UpdateUpdatableTimerExecution(longCtx, &workflowservice.UpdateUpdatableTimerExecutionRequest{
+			Namespace: s.Namespace().String(),
+			TimerId:   timerID,
+			RunId:     startResp.GetRunId(),
+			Deadline:  newDeadline,
+		})
+		require.NoError(t, err)
+
+		select {
+		case <-describeDone:
+			require.NoError(t, descErr)
+			require.Equal(t, newDeadline.AsTime().Unix(), descResp2.GetInfo().GetDeadline().AsTime().Unix())
+			require.Equal(t, enumspb.UPDATABLE_TIMER_EXECUTION_STATUS_RUNNING, descResp2.GetInfo().GetStatus())
+		case <-longCtx.Done():
+			t.Fatal("DescribeUpdatableTimerExecution long-poll timed out")
+		}
+	})
+
+	t.Run("UpdateNonExistent", func(t *testing.T) {
+		timerID := testcore.RandomizeStr(t.Name())
+		_, err := s.FrontendClient().UpdateUpdatableTimerExecution(ctx, &workflowservice.UpdateUpdatableTimerExecutionRequest{
+			Namespace: s.Namespace().String(),
+			TimerId:   timerID,
+			Deadline:  timestamppb.New(time.Now().Add(1 * time.Hour)),
+		})
+		var notFoundErr *serviceerror.NotFound
+		require.ErrorAs(t, err, &notFoundErr)
+	})
+
+	t.Run("RequestValidations", func(t *testing.T) {
+		t.Run("EmptyTimerID", func(t *testing.T) {
+			_, err := s.FrontendClient().UpdateUpdatableTimerExecution(ctx, &workflowservice.UpdateUpdatableTimerExecutionRequest{
+				Namespace: s.Namespace().String(),
+				TimerId:   "",
+				Deadline:  timestamppb.New(time.Now().Add(1 * time.Hour)),
+			})
+			var invalidArgErr *serviceerror.InvalidArgument
+			require.ErrorAs(t, err, &invalidArgErr)
+			require.Contains(t, invalidArgErr.Message, "timer_id is required")
+		})
+
+		t.Run("NilDeadline", func(t *testing.T) {
+			_, err := s.FrontendClient().UpdateUpdatableTimerExecution(ctx, &workflowservice.UpdateUpdatableTimerExecutionRequest{
+				Namespace: s.Namespace().String(),
+				TimerId:   testcore.RandomizeStr(t.Name()),
+			})
+			var invalidArgErr *serviceerror.InvalidArgument
+			require.ErrorAs(t, err, &invalidArgErr)
+			require.Contains(t, invalidArgErr.Message, "deadline is required")
+		})
+
+		t.Run("InvalidRunID", func(t *testing.T) {
+			_, err := s.FrontendClient().UpdateUpdatableTimerExecution(ctx, &workflowservice.UpdateUpdatableTimerExecutionRequest{
+				Namespace: s.Namespace().String(),
+				TimerId:   testcore.RandomizeStr(t.Name()),
+				RunId:     "not-a-uuid",
+				Deadline:  timestamppb.New(time.Now().Add(1 * time.Hour)),
+			})
+			var invalidArgErr *serviceerror.InvalidArgument
+			require.ErrorAs(t, err, &invalidArgErr)
+			require.Contains(t, invalidArgErr.Message, "invalid run id")
+		})
+	})
+}
+
+func (s *updatableTimerTestSuite) TestTerminate() {
+	t := s.T()
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+
+	t.Run("TerminateRunning", func(t *testing.T) {
+		timerID := testcore.RandomizeStr(t.Name())
+		deadline := timestamppb.New(time.Now().Add(1 * time.Hour))
+
+		startResp, err := s.startTimer(ctx, timerID, deadline)
+		require.NoError(t, err)
+
+		identity := "terminator"
+		reason := "test termination"
+		_, err = s.FrontendClient().TerminateUpdatableTimerExecution(ctx, &workflowservice.TerminateUpdatableTimerExecutionRequest{
+			Namespace: s.Namespace().String(),
+			TimerId:   timerID,
+			RunId:     startResp.GetRunId(),
+			Reason:    reason,
+			Identity:  identity,
+			RequestId: s.tv.RequestID(),
+		})
+		require.NoError(t, err)
+
+		descResp, err := s.describeTimer(ctx, timerID, startResp.GetRunId())
+		require.NoError(t, err)
+
+		info := descResp.GetInfo()
+		require.Equal(t, enumspb.UPDATABLE_TIMER_EXECUTION_STATUS_TERMINATED, info.GetStatus())
+		require.NotNil(t, info.GetCloseTime())
+
+		outcome := descResp.GetOutcome()
+		require.NotNil(t, outcome.GetFailure())
+		require.Equal(t, reason, outcome.GetFailure().GetMessage())
+		require.Equal(t, identity, outcome.GetFailure().GetTerminatedFailureInfo().GetIdentity())
+	})
+
+	t.Run("DuplicateRequestIDSucceeds", func(t *testing.T) {
+		timerID := testcore.RandomizeStr(t.Name())
+		deadline := timestamppb.New(time.Now().Add(1 * time.Hour))
+
+		startResp, err := s.startTimer(ctx, timerID, deadline)
+		require.NoError(t, err)
+
+		reqID := "terminate-request-id"
+		for range 2 {
+			_, err = s.FrontendClient().TerminateUpdatableTimerExecution(ctx, &workflowservice.TerminateUpdatableTimerExecutionRequest{
+				Namespace: s.Namespace().String(),
+				TimerId:   timerID,
+				RunId:     startResp.GetRunId(),
+				Reason:    "test termination",
+				Identity:  "terminator",
+				RequestId: reqID,
+			})
+			require.NoError(t, err)
+		}
+	})
+
+	t.Run("DifferentRequestIDFails", func(t *testing.T) {
+		timerID := testcore.RandomizeStr(t.Name())
+		deadline := timestamppb.New(time.Now().Add(1 * time.Hour))
+
+		startResp, err := s.startTimer(ctx, timerID, deadline)
+		require.NoError(t, err)
+
+		_, err = s.FrontendClient().TerminateUpdatableTimerExecution(ctx, &workflowservice.TerminateUpdatableTimerExecutionRequest{
+			Namespace: s.Namespace().String(),
+			TimerId:   timerID,
+			RunId:     startResp.GetRunId(),
+			Reason:    "test termination",
+			Identity:  "terminator",
+			RequestId: "request-id-1",
+		})
+		require.NoError(t, err)
+
+		_, err = s.FrontendClient().TerminateUpdatableTimerExecution(ctx, &workflowservice.TerminateUpdatableTimerExecutionRequest{
+			Namespace: s.Namespace().String(),
+			TimerId:   timerID,
+			RunId:     startResp.GetRunId(),
+			Reason:    "test termination",
+			Identity:  "terminator",
+			RequestId: "request-id-2",
+		})
+		var failedPreconditionErr *serviceerror.FailedPrecondition
+		require.ErrorAs(t, err, &failedPreconditionErr)
+	})
+
+	t.Run("AlreadyFiredCannotTerminate", func(t *testing.T) {
+		longCtx, longCancel := context.WithTimeout(t.Context(), 30*time.Second)
+		defer longCancel()
+
+		timerID := testcore.RandomizeStr(t.Name())
+		deadline := timestamppb.New(time.Now().Add(100 * time.Millisecond))
+
+		startResp, err := s.startTimer(longCtx, timerID, deadline)
+		require.NoError(t, err)
+
+		s.eventuallyFired(longCtx, t, timerID, startResp.GetRunId())
+
+		_, err = s.FrontendClient().TerminateUpdatableTimerExecution(longCtx, &workflowservice.TerminateUpdatableTimerExecutionRequest{
+			Namespace: s.Namespace().String(),
+			TimerId:   timerID,
+			RunId:     startResp.GetRunId(),
+			Reason:    "too late",
+			Identity:  "terminator",
+		})
+		require.Error(t, err)
+	})
+
+	t.Run("NonExistent", func(t *testing.T) {
+		timerID := testcore.RandomizeStr(t.Name())
+
+		_, err := s.FrontendClient().TerminateUpdatableTimerExecution(ctx, &workflowservice.TerminateUpdatableTimerExecutionRequest{
+			Namespace: s.Namespace().String(),
+			TimerId:   timerID,
+			Reason:    "test termination",
+			Identity:  "terminator",
+		})
+		var notFoundErr *serviceerror.NotFound
+		require.ErrorAs(t, err, &notFoundErr)
+	})
+
+	t.Run("RequestValidations", func(t *testing.T) {
+		t.Run("EmptyTimerID", func(t *testing.T) {
+			_, err := s.FrontendClient().TerminateUpdatableTimerExecution(ctx, &workflowservice.TerminateUpdatableTimerExecutionRequest{
+				Namespace: s.Namespace().String(),
+				Reason:    "test",
+			})
+			var invalidArgErr *serviceerror.InvalidArgument
+			require.ErrorAs(t, err, &invalidArgErr)
+			require.Contains(t, invalidArgErr.Message, "timer_id is required")
+		})
+
+		t.Run("TimerIDTooLong", func(t *testing.T) {
+			_, err := s.FrontendClient().TerminateUpdatableTimerExecution(ctx, &workflowservice.TerminateUpdatableTimerExecutionRequest{
+				Namespace: s.Namespace().String(),
+				TimerId:   string(make([]byte, 1001)),
+				Reason:    "test",
+			})
+			var invalidArgErr *serviceerror.InvalidArgument
+			require.ErrorAs(t, err, &invalidArgErr)
+			require.Contains(t, invalidArgErr.Message, "timer_id exceeds length limit")
+		})
+
+		t.Run("InvalidRunID", func(t *testing.T) {
+			_, err := s.FrontendClient().TerminateUpdatableTimerExecution(ctx, &workflowservice.TerminateUpdatableTimerExecutionRequest{
+				Namespace: s.Namespace().String(),
+				TimerId:   testcore.RandomizeStr(t.Name()),
+				RunId:     "not-a-uuid",
+				Reason:    "test",
+			})
+			var invalidArgErr *serviceerror.InvalidArgument
+			require.ErrorAs(t, err, &invalidArgErr)
+			require.Contains(t, invalidArgErr.Message, "invalid run id")
+		})
+	})
+}
+
+// eventuallyFired polls until the timer status is FIRED.
+func (s *updatableTimerTestSuite) eventuallyFired(ctx context.Context, t *testing.T, timerID, runID string) {
+	t.Helper()
+	require.Eventually(t, func() bool {
+		resp, err := s.describeTimer(ctx, timerID, runID)
+		return err == nil && resp.GetInfo().GetStatus() == enumspb.UPDATABLE_TIMER_EXECUTION_STATUS_FIRED
+	}, 10*time.Second, 100*time.Millisecond)
+}
+
+func (s *updatableTimerTestSuite) TestPoll() {
+	t := s.T()
+
+	t.Run("PollForFiredOutcome", func(t *testing.T) {
+		longCtx, longCancel := context.WithTimeout(t.Context(), 30*time.Second)
+		defer longCancel()
+
+		timerID := testcore.RandomizeStr(t.Name())
+		deadline := timestamppb.New(time.Now().Add(100 * time.Millisecond))
+
+		startResp, err := s.startTimer(longCtx, timerID, deadline)
+		require.NoError(t, err)
+
+		pollResp, err := s.FrontendClient().PollUpdatableTimerExecution(longCtx, &workflowservice.PollUpdatableTimerExecutionRequest{
+			Namespace: s.Namespace().String(),
+			TimerId:   timerID,
+			RunId:     startResp.GetRunId(),
+		})
+		require.NoError(t, err)
+		require.Equal(t, startResp.GetRunId(), pollResp.GetRunId())
+		require.NotNil(t, pollResp.GetOutcome().GetFired())
+	})
+
+	t.Run("PollForTerminatedOutcome", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+		defer cancel()
+
+		timerID := testcore.RandomizeStr(t.Name())
+		deadline := timestamppb.New(time.Now().Add(1 * time.Hour))
+
+		startResp, err := s.startTimer(ctx, timerID, deadline)
+		require.NoError(t, err)
+
+		reason := "terminated for test"
+		identity := "poll-test-terminator"
+		_, err = s.FrontendClient().TerminateUpdatableTimerExecution(ctx, &workflowservice.TerminateUpdatableTimerExecutionRequest{
+			Namespace: s.Namespace().String(),
+			TimerId:   timerID,
+			RunId:     startResp.GetRunId(),
+			Reason:    reason,
+			Identity:  identity,
+		})
+		require.NoError(t, err)
+
+		pollResp, err := s.FrontendClient().PollUpdatableTimerExecution(ctx, &workflowservice.PollUpdatableTimerExecutionRequest{
+			Namespace: s.Namespace().String(),
+			TimerId:   timerID,
+			RunId:     startResp.GetRunId(),
+		})
+		require.NoError(t, err)
+		require.Equal(t, startResp.GetRunId(), pollResp.GetRunId())
+		require.Equal(t, reason, pollResp.GetOutcome().GetFailure().GetMessage())
+		require.Equal(t, identity, pollResp.GetOutcome().GetFailure().GetTerminatedFailureInfo().GetIdentity())
+	})
+}
+
+func (s *updatableTimerTestSuite) TestDeadlineFired() {
+	t := s.T()
+	longCtx, longCancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer longCancel()
+
+	timerID := testcore.RandomizeStr(t.Name())
+	deadline := timestamppb.New(time.Now().Add(100 * time.Millisecond))
+
+	startResp, err := s.startTimer(longCtx, timerID, deadline)
+	require.NoError(t, err)
+
+	pollResp, err := s.FrontendClient().PollUpdatableTimerExecution(longCtx, &workflowservice.PollUpdatableTimerExecutionRequest{
+		Namespace: s.Namespace().String(),
+		TimerId:   timerID,
+		RunId:     startResp.GetRunId(),
+	})
+	require.NoError(t, err)
+	require.NotNil(t, pollResp.GetOutcome().GetFired())
+
+	descResp, err := s.describeTimer(longCtx, timerID, startResp.GetRunId())
+	require.NoError(t, err)
+
+	info := descResp.GetInfo()
+	require.Equal(t, enumspb.UPDATABLE_TIMER_EXECUTION_STATUS_FIRED, info.GetStatus())
+	require.NotNil(t, info.GetCloseTime())
+	require.NotNil(t, descResp.GetOutcome().GetFired())
+}
