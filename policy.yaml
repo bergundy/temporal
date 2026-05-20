@@ -1,0 +1,23 @@
+# Example policy consumed by the customserver Nexus authorizer.
+# Path is configurable via the NEXUS_AUTHZ_POLICY_FILE environment variable.
+#
+# Rule matching:
+#   - `subject: "*"` matches any subject.
+#   - `permissions: []` (or omitted) means no permission is required;
+#     otherwise the caller must have *all* listed permissions.
+#   - `operation: "*"` matches any Nexus operation on the named endpoint
+#     and service.
+rules:
+  - subject: alice
+    permissions: [reader]
+    allow:
+      - endpoint: my-nexus-endpoint-name
+        service: my-hello-service
+        operation: echo
+
+  - subject: bob
+    permissions: [writer]
+    allow:
+      - endpoint: my-nexus-endpoint-name
+        service: my-hello-service
+        operation: "*"
