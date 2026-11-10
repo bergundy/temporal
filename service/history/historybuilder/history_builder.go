@@ -21,6 +21,7 @@ import (
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/worker_versioning"
 	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 const (
@@ -355,6 +356,69 @@ func (b *HistoryBuilder) AddActivityTaskStartedEvent(
 	return event
 }
 
+// AddOptimisticActivityTaskStartedEvent adds the started event written together with the outcome
+// of an optimistically started activity. The event has the time the activity started and is not
+// buffered.
+func (b *HistoryBuilder) AddOptimisticActivityTaskStartedEvent(
+	scheduledEventID int64,
+	attempt int32,
+	requestID string,
+	identity string,
+	versioningStamp *commonpb.WorkerVersionStamp,
+	redirectCounter int64,
+	startedTime *timestamppb.Timestamp,
+) *historypb.HistoryEvent {
+	event := b.CreateActivityTaskStartedEvent(scheduledEventID, attempt, requestID, identity, nil, versioningStamp, redirectCounter)
+	event.EventTime = startedTime
+	event.GetActivityTaskStartedEventAttributes().OptimisticResolution = true
+	event, _ = b.add(event)
+	return event
+}
+
+// AddOptimisticActivityTaskCompletedEvent adds a completed event that the workflow observed during
+// the workflow task that reports it. The event is not buffered.
+func (b *HistoryBuilder) AddOptimisticActivityTaskCompletedEvent(
+	scheduledEventID int64,
+	startedEventID int64,
+	identity string,
+	result *commonpb.Payloads,
+	workflowTime time.Time,
+	ns namespace.Name,
+) *historypb.HistoryEvent {
+	event := b.CreateActivityTaskCompletedEvent(scheduledEventID, startedEventID, identity, result)
+	event.GetActivityTaskCompletedEventAttributes().OptimisticResolution = &historypb.OptimisticResolution{
+		WorkflowTime: timestamppb.New(workflowTime),
+	}
+	event, _ = b.add(event)
+
+	if payloadSize := result.Size(); payloadSize > 0 {
+		b.metricsHandler.Counter(metrics.ActivityPayloadSize.Name()).Record(
+			int64(payloadSize),
+			metrics.OperationTag(metrics.HistoryRespondWorkflowTaskCompletedScope),
+			metrics.NamespaceTag(ns.String()))
+	}
+
+	return event
+}
+
+// AddOptimisticActivityTaskCanceledEvent adds a canceled event that the workflow observed during the
+// workflow task that reports it. The event is not buffered.
+func (b *HistoryBuilder) AddOptimisticActivityTaskCanceledEvent(
+	scheduledEventID int64,
+	startedEventID int64,
+	latestCancelRequestedEventID int64,
+	details *commonpb.Payloads,
+	identity string,
+	workflowTime time.Time,
+) *historypb.HistoryEvent {
+	event := b.CreateActivityTaskCanceledEvent(scheduledEventID, startedEventID, latestCancelRequestedEventID, details, identity)
+	event.GetActivityTaskCanceledEventAttributes().OptimisticResolution = &historypb.OptimisticResolution{
+		WorkflowTime: timestamppb.New(workflowTime),
+	}
+	event, _ = b.add(event)
+	return event
+}
+
 func (b *HistoryBuilder) AddActivityTaskCompletedEvent(
 	scheduledEventID int64,
 	startedEventID int64,
@@ -546,6 +610,21 @@ func (b *HistoryBuilder) AddTimerFiredEvent(
 ) *historypb.HistoryEvent {
 	event := b.CreateTimerFiredEvent(startedEventID, timerID)
 
+	event, _ = b.add(event)
+	return event
+}
+
+// AddOptimisticTimerFiredEvent adds a fired event that the workflow observed during the workflow
+// task that reports it. The event is not buffered.
+func (b *HistoryBuilder) AddOptimisticTimerFiredEvent(
+	startedEventID int64,
+	timerID string,
+	workflowTime time.Time,
+) *historypb.HistoryEvent {
+	event := b.CreateTimerFiredEvent(startedEventID, timerID)
+	event.GetTimerFiredEventAttributes().OptimisticResolution = &historypb.OptimisticResolution{
+		WorkflowTime: timestamppb.New(workflowTime),
+	}
 	event, _ = b.add(event)
 	return event
 }

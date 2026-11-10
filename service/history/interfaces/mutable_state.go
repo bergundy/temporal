@@ -68,6 +68,18 @@ type (
 			*clockspb.VectorClock, // startedClock
 		) (*historypb.HistoryEvent, error)
 		AddActivityTaskTimedOutEvent(int64, int64, *failurepb.Failure, enumspb.RetryState) (*historypb.HistoryEvent, error)
+		// AddOptimisticActivityTaskCompletedEvent writes the started and completed events of an
+		// optimistically started activity. The events are flagged as an optimistic resolution
+		// observed at workflowTime and are appended without buffering.
+		AddOptimisticActivityTaskCompletedEvent(scheduledEventID int64, identity string, result *commonpb.Payloads, workflowTime time.Time) (*historypb.HistoryEvent, error)
+		// AddOptimisticActivityTaskCanceledEvent writes the started and canceled events of an
+		// optimistically started activity with a cancel request. The events are flagged as an
+		// optimistic resolution observed at workflowTime and are appended without buffering.
+		AddOptimisticActivityTaskCanceledEvent(scheduledEventID int64, identity string, details *commonpb.Payloads, workflowTime time.Time) (*historypb.HistoryEvent, error)
+		// AddOptimisticTimerFiredEvent writes the fired event of an optimistically started timer.
+		// The event is flagged as an optimistic resolution observed at workflowTime and is appended
+		// without buffering.
+		AddOptimisticTimerFiredEvent(timerID string, workflowTime time.Time) (*historypb.HistoryEvent, error)
 		AddChildWorkflowExecutionCanceledEvent(int64, *commonpb.WorkflowExecution, *historypb.WorkflowExecutionCanceledEventAttributes) (*historypb.HistoryEvent, error)
 		AddChildWorkflowExecutionCompletedEvent(int64, *commonpb.WorkflowExecution, *historypb.WorkflowExecutionCompletedEventAttributes) (*historypb.HistoryEvent, error)
 		AddChildWorkflowExecutionFailedEvent(int64, *commonpb.WorkflowExecution, *historypb.WorkflowExecutionFailedEventAttributes) (*historypb.HistoryEvent, error)

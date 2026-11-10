@@ -4522,16 +4522,7 @@ func (ms *MutableStateImpl) addStartedEventForTransientActivity(
 		// failed, cancelled, or timed out. For some cases such as timeout, cancellation, and failed by Resetter we do
 		// not receive a stamp because worker is not involved, therefore, we reconstruct the stamp base on pending
 		// activity data, if versioning is used.
-		// Find the build ID of the worker to whom the task was dispatched base on whether it was an independently-
-		// assigned activity or not.
-		startedBuildId := ai.GetLastIndependentlyAssignedBuildId()
-		if useWf := ai.GetUseWorkflowBuildIdInfo(); useWf != nil {
-			startedBuildId = useWf.GetLastUsedBuildId()
-		}
-		if startedBuildId != "" {
-			// If a build ID is found, i.e. versioning is used for the activity, set versioning stamp.
-			versioningStamp = &commonpb.WorkerVersionStamp{UseVersioning: true, BuildId: startedBuildId}
-		}
+		versioningStamp = startedActivityVersioningStamp(ai)
 	}
 
 	// activity task was started (as transient event), we need to add it now.
@@ -4549,6 +4540,129 @@ func (ms *MutableStateImpl) addStartedEventForTransientActivity(
 		event.EventTime = ai.StartedTime
 	}
 	return ms.ApplyActivityTaskStartedEvent(event)
+}
+
+// startedActivityVersioningStamp returns the versioning stamp of the worker to whom the activity
+// task was dispatched, or nil if versioning isn't used for the activity.
+func startedActivityVersioningStamp(ai *persistencespb.ActivityInfo) *commonpb.WorkerVersionStamp {
+	// Find the build ID of the worker to whom the task was dispatched base on whether it was an independently-
+	// assigned activity or not.
+	startedBuildID := ai.GetLastIndependentlyAssignedBuildId()
+	if useWf := ai.GetUseWorkflowBuildIdInfo(); useWf != nil {
+		startedBuildID = useWf.GetLastUsedBuildId()
+	}
+	if startedBuildID == "" {
+		return nil
+	}
+	return &commonpb.WorkerVersionStamp{UseVersioning: true, BuildId: startedBuildID}
+}
+
+// addOptimisticActivityTaskStartedEvent writes the started event of an optimistically started
+// activity, which has a transient start until its outcome is written.
+func (ms *MutableStateImpl) addOptimisticActivityTaskStartedEvent(
+	opTag tag.ZapTag,
+	ai *persistencespb.ActivityInfo,
+) (*historypb.HistoryEvent, error) {
+	if ai.StartedEventId != common.TransientEventID {
+		ms.logWarn(mutableStateInvalidHistoryActionMsg, opTag,
+			tag.WorkflowEventID(ms.GetNextEventID()),
+			tag.ErrorTypeInvalidHistoryAction,
+			tag.WorkflowScheduledEventID(ai.ScheduledEventId),
+			tag.WorkflowStartedEventID(ai.StartedEventId))
+		return nil, ms.createCallerError(opTag, fmt.Sprintf("ScheduledEventID: %d", ai.ScheduledEventId))
+	}
+
+	event := ms.hBuilder.AddOptimisticActivityTaskStartedEvent(
+		ai.ScheduledEventId,
+		ai.Attempt,
+		ai.RequestId,
+		ai.StartedIdentity,
+		startedActivityVersioningStamp(ai),
+		ai.GetUseWorkflowBuildIdInfo().GetLastRedirectCounter(),
+		ai.StartedTime,
+	)
+	if err := ms.ApplyActivityTaskStartedEvent(event); err != nil {
+		return nil, err
+	}
+	return event, nil
+}
+
+func (ms *MutableStateImpl) AddOptimisticActivityTaskCompletedEvent(
+	scheduledEventID int64,
+	identity string,
+	result *commonpb.Payloads,
+	workflowTime time.Time,
+) (*historypb.HistoryEvent, error) {
+	opTag := tag.WorkflowActionActivityTaskCompleted
+	if err := ms.checkMutability(opTag); err != nil {
+		return nil, err
+	}
+
+	ai, ok := ms.GetActivityInfo(scheduledEventID)
+	if !ok {
+		ms.logWarn(mutableStateInvalidHistoryActionMsg, opTag,
+			tag.WorkflowEventID(ms.GetNextEventID()),
+			tag.ErrorTypeInvalidHistoryAction,
+			tag.WorkflowScheduledEventID(scheduledEventID))
+		return nil, ms.createCallerError(opTag, fmt.Sprintf("ScheduledEventID: %d", scheduledEventID))
+	}
+
+	startedEvent, err := ms.addOptimisticActivityTaskStartedEvent(opTag, ai)
+	if err != nil {
+		return nil, err
+	}
+	event := ms.hBuilder.AddOptimisticActivityTaskCompletedEvent(
+		scheduledEventID,
+		startedEvent.GetEventId(),
+		identity,
+		result,
+		workflowTime,
+		ms.namespaceEntry.Name(),
+	)
+	if err := ms.ApplyActivityTaskCompletedEvent(event); err != nil {
+		return nil, err
+	}
+	return event, nil
+}
+
+func (ms *MutableStateImpl) AddOptimisticActivityTaskCanceledEvent(
+	scheduledEventID int64,
+	identity string,
+	details *commonpb.Payloads,
+	workflowTime time.Time,
+) (*historypb.HistoryEvent, error) {
+	opTag := tag.WorkflowActionActivityTaskCanceled
+	if err := ms.checkMutability(opTag); err != nil {
+		return nil, err
+	}
+
+	ai, ok := ms.GetActivityInfo(scheduledEventID)
+	if !ok || !ai.CancelRequested {
+		ms.logWarn(mutableStateInvalidHistoryActionMsg, opTag,
+			tag.WorkflowEventID(ms.GetNextEventID()),
+			tag.ErrorTypeInvalidHistoryAction,
+			tag.Bool("hasActivityInfo", ok),
+			tag.WorkflowScheduledEventID(scheduledEventID))
+		return nil, ms.createCallerError(opTag, fmt.Sprintf("ScheduledEventID: %d", scheduledEventID))
+	}
+
+	latestCancelRequestedEventID := ai.CancelRequestId
+	startedEvent, err := ms.addOptimisticActivityTaskStartedEvent(opTag, ai)
+	if err != nil {
+		return nil, err
+	}
+	event := ms.hBuilder.AddOptimisticActivityTaskCanceledEvent(
+		scheduledEventID,
+		startedEvent.GetEventId(),
+		latestCancelRequestedEventID,
+		details,
+		identity,
+		workflowTime,
+	)
+	if err := ms.ApplyActivityTaskCanceledEvent(event); err != nil {
+		return nil, err
+	}
+	return event, nil
 }
 
 func (ms *MutableStateImpl) AddActivityTaskStartedEvent(
@@ -5674,6 +5788,31 @@ func (ms *MutableStateImpl) AddTimerFiredEvent(
 
 	// Timer is running.
 	event := ms.hBuilder.AddTimerFiredEvent(timerInfo.GetStartedEventId(), timerInfo.TimerId)
+	if err := ms.ApplyTimerFiredEvent(event); err != nil {
+		return nil, err
+	}
+	return event, nil
+}
+
+func (ms *MutableStateImpl) AddOptimisticTimerFiredEvent(
+	timerID string,
+	workflowTime time.Time,
+) (*historypb.HistoryEvent, error) {
+	opTag := tag.WorkflowActionTimerFired
+	if err := ms.checkMutability(opTag); err != nil {
+		return nil, err
+	}
+
+	timerInfo, ok := ms.GetUserTimerInfo(timerID)
+	if !ok {
+		ms.logWarn(mutableStateInvalidHistoryActionMsg, opTag,
+			tag.WorkflowEventID(ms.GetNextEventID()),
+			tag.ErrorTypeInvalidHistoryAction,
+			tag.WorkflowTimerID(timerID))
+		return nil, ms.createCallerError(opTag, "TimerID: "+timerID)
+	}
+
+	event := ms.hBuilder.AddOptimisticTimerFiredEvent(timerInfo.GetStartedEventId(), timerID, workflowTime)
 	if err := ms.ApplyTimerFiredEvent(event); err != nil {
 		return nil, err
 	}

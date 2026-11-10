@@ -2300,20 +2300,20 @@ func (s *historyBuilderSuite) TestBufferEvent() {
 
 	// test workflowEvents, workflowTaskEvents, commandEvents will return true
 	for eventType := range workflowEvents {
-		s.False(s.historyBuilder.bufferEvent(eventType))
+		s.False(s.historyBuilder.bufferEventType(eventType))
 	}
 	for eventType := range workflowTaskEvents {
-		s.False(s.historyBuilder.bufferEvent(eventType))
+		s.False(s.historyBuilder.bufferEventType(eventType))
 	}
 	for eventType := range commandEvents {
-		s.False(s.historyBuilder.bufferEvent(eventType))
+		s.False(s.historyBuilder.bufferEventType(eventType))
 	}
 	for eventType := range messageEvents {
-		s.False(s.historyBuilder.bufferEvent(eventType))
+		s.False(s.historyBuilder.bufferEventType(eventType))
 	}
 	// other events will return false
 	for eventType := range otherEvents {
-		s.True(s.historyBuilder.bufferEvent(eventType))
+		s.True(s.historyBuilder.bufferEventType(eventType))
 	}
 
 	commandsWithEventsCount := 0
@@ -2321,7 +2321,11 @@ func (s *historyBuilderSuite) TestBufferEvent() {
 		commandType := enumspb.CommandType(ct)
 		// Unspecified is not counted.
 		// ProtocolMessage command doesn't have corresponding event.
-		if commandType == enumspb.COMMAND_TYPE_UNSPECIFIED || commandType == enumspb.COMMAND_TYPE_PROTOCOL_MESSAGE {
+		// Optimistic resolution commands write events that are not buffered because of a flag on the event, not their type.
+		if commandType == enumspb.COMMAND_TYPE_UNSPECIFIED ||
+			commandType == enumspb.COMMAND_TYPE_PROTOCOL_MESSAGE ||
+			commandType == enumspb.COMMAND_TYPE_RESOLVE_OPTIMISTIC_ACTIVITY ||
+			commandType == enumspb.COMMAND_TYPE_FIRE_OPTIMISTIC_TIMER {
 			continue
 		}
 		commandsWithEventsCount++
@@ -2330,6 +2334,76 @@ func (s *historyBuilderSuite) TestBufferEvent() {
 		commandsWithEventsCount,
 		len(commandEvents),
 		"This assertion is broken when a new command is added and no corresponding logic for corresponding command event is added to HistoryBuilder.bufferEvent",
+	)
+}
+
+func (s *historyBuilderSuite) TestOptimisticResolutionsAreAppendedInOrder() {
+	workflowTaskCompletedEventID := rand.Int63()
+	workflowTime := s.now.Add(time.Second)
+	optimisticStart := &commandpb.OptimisticStart{StartOffset: durationpb.New(time.Millisecond)}
+
+	scheduledEvent, _ := s.historyBuilder.AddActivityTaskScheduledEvent(
+		workflowTaskCompletedEventID,
+		&commandpb.ScheduleActivityTaskCommandAttributes{ActivityId: "activity", OptimisticStart: optimisticStart},
+		defaultNamespace,
+	)
+	signalEvent := s.historyBuilder.AddWorkflowExecutionSignaledEvent(
+		"signal", testPayloads, testIdentity, testHeader, nil, "", nil,
+	)
+	startedTime := timestamppb.New(s.now.Add(-time.Second))
+	startedEvent := s.historyBuilder.AddOptimisticActivityTaskStartedEvent(
+		scheduledEvent.GetEventId(), 1, testRequestID, testIdentity, nil, 0, startedTime,
+	)
+	completedEvent := s.historyBuilder.AddOptimisticActivityTaskCompletedEvent(
+		scheduledEvent.GetEventId(), startedEvent.GetEventId(), testIdentity, testPayloads, workflowTime, defaultNamespace,
+	)
+	timerStartedEvent := s.historyBuilder.AddTimerStartedEvent(
+		workflowTaskCompletedEventID,
+		&commandpb.StartTimerCommandAttributes{TimerId: "timer", OptimisticStart: optimisticStart},
+	)
+	timerFiredEvent := s.historyBuilder.AddOptimisticTimerFiredEvent(
+		timerStartedEvent.GetEventId(), "timer", workflowTime,
+	)
+	canceledEvent := s.historyBuilder.AddOptimisticActivityTaskCanceledEvent(
+		scheduledEvent.GetEventId(), startedEvent.GetEventId(), 0, testPayloads, testIdentity, workflowTime,
+	)
+	// Events without the optimistic resolution flag are still buffered.
+	bufferedCompletedEvent := s.historyBuilder.AddActivityTaskCompletedEvent(
+		scheduledEvent.GetEventId(), common.TransientEventID, testIdentity, testPayloads, defaultNamespace,
+	)
+
+	historyMutation, err := s.historyBuilder.Finish(true)
+	s.NoError(err)
+	s.Equal([][]*historypb.HistoryEvent{{
+		scheduledEvent,
+		startedEvent,
+		completedEvent,
+		timerStartedEvent,
+		timerFiredEvent,
+		canceledEvent,
+		signalEvent,
+		bufferedCompletedEvent,
+	}}, historyMutation.DBEventsBatches)
+	for i, event := range historyMutation.DBEventsBatches[0] {
+		s.Equal(s.nextEventID+int64(i), event.GetEventId())
+	}
+
+	s.True(scheduledEvent.GetActivityTaskScheduledEventAttributes().GetOptimisticStart())
+	s.True(timerStartedEvent.GetTimerStartedEventAttributes().GetOptimisticStart())
+	s.True(startedEvent.GetActivityTaskStartedEventAttributes().GetOptimisticResolution())
+	protorequire.ProtoEqual(s.T(), startedTime, startedEvent.GetEventTime())
+	s.Equal(startedEvent.GetEventId(), completedEvent.GetActivityTaskCompletedEventAttributes().GetStartedEventId())
+	protorequire.ProtoEqual(s.T(),
+		&historypb.OptimisticResolution{WorkflowTime: timestamppb.New(workflowTime)},
+		completedEvent.GetActivityTaskCompletedEventAttributes().GetOptimisticResolution(),
+	)
+	protorequire.ProtoEqual(s.T(),
+		&historypb.OptimisticResolution{WorkflowTime: timestamppb.New(workflowTime)},
+		timerFiredEvent.GetTimerFiredEventAttributes().GetOptimisticResolution(),
+	)
+	protorequire.ProtoEqual(s.T(),
+		&historypb.OptimisticResolution{WorkflowTime: timestamppb.New(workflowTime)},
+		canceledEvent.GetActivityTaskCanceledEventAttributes().GetOptimisticResolution(),
 	)
 }
 

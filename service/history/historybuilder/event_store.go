@@ -94,7 +94,7 @@ func (b *EventStore) add(
 	}
 
 	batchID := common.EmptyEventID
-	if b.bufferEvent(event.GetEventType()) {
+	if b.bufferEvent(event) {
 		event.EventId = common.BufferedEventID
 		b.memBufferBatch = append(b.memBufferBatch, event)
 	} else {
@@ -301,6 +301,14 @@ func (b *EventStore) assertNotSealed() {
 }
 
 func (b *EventStore) bufferEvent(
+	event *historypb.HistoryEvent,
+) bool {
+	// The workflow already observed optimistic resolutions in the workflow task that reports them.
+	// They are appended in command order instead of after the commands' other events.
+	return !isOptimisticResolution(event) && b.bufferEventType(event.GetEventType())
+}
+
+func (b *EventStore) bufferEventType(
 	eventType enumspb.EventType,
 ) bool {
 	switch eventType {
@@ -363,6 +371,13 @@ func (b *EventStore) bufferEvent(
 	default:
 		return true
 	}
+}
+
+func isOptimisticResolution(event *historypb.HistoryEvent) bool {
+	return event.GetActivityTaskStartedEventAttributes().GetOptimisticResolution() ||
+		event.GetActivityTaskCompletedEventAttributes().GetOptimisticResolution() != nil ||
+		event.GetActivityTaskCanceledEventAttributes().GetOptimisticResolution() != nil ||
+		event.GetTimerFiredEventAttributes().GetOptimisticResolution() != nil
 }
 
 func (b *EventStore) finishEvent(
