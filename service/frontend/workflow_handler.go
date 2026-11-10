@@ -1297,9 +1297,10 @@ func (wh *WorkflowHandler) RespondWorkflowTaskCompleted(
 	}
 
 	return &workflowservice.RespondWorkflowTaskCompletedResponse{
-		WorkflowTask:        response.NewWorkflowTask,
-		ActivityTasks:       response.ActivityTasks,
-		ResetHistoryEventId: response.ResetHistoryEventId,
+		WorkflowTask:            response.NewWorkflowTask,
+		ActivityTasks:           response.ActivityTasks,
+		ResetHistoryEventId:     response.ResetHistoryEventId,
+		OptimisticActivityTasks: response.OptimisticActivityTasks,
 	}, nil
 }
 

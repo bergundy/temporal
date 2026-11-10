@@ -1172,6 +1172,7 @@ func (d *namespaceHandler) createResponse(
 			PollerAutoscaling:                  true,
 			PollerAutoscalingAutoEnroll:        d.config.PollerAutoscalingAutoEnroll(info.Name),
 			WorkflowTaskCompletionPagination:   d.config.EnableWorkflowTaskCompletionPagination(info.Name),
+			OptimisticStart:                    d.config.EnableOptimisticStart(info.Name),
 		},
 		Limits: &namespacepb.NamespaceInfo_Limits{
 			BlobSizeLimitError:                   int64(d.config.BlobSizeLimitError(info.Name)),

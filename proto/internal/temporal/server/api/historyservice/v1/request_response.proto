@@ -416,6 +416,9 @@ message RespondWorkflowTaskCompletedResponse {
   repeated temporal.api.workflowservice.v1.PollActivityTaskQueueResponse activity_tasks = 2;
   int64 reset_history_event_id = 3;
   temporal.api.workflowservice.v1.PollWorkflowTaskQueueResponse new_workflow_task = 4;
+  // Activities started optimistically in the completed workflow task that are still running and
+  // are now owned by the server. See the field of the same name on the public response.
+  repeated temporal.api.workflowservice.v1.PollActivityTaskQueueResponse optimistic_activity_tasks = 5;
 }
 
 message RespondWorkflowTaskFailedRequest {

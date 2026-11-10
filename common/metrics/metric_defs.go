@@ -1060,6 +1060,30 @@ var (
 		"eager_dispatch_requests_sent",
 		WithDescription("Number of task grants sent by History through GrantEagerDispatch, summed from the request item counts."),
 	)
+	OptimisticActivityStarted = NewCounterDef(
+		"optimistic_activity_started",
+		WithDescription("Number of activities a worker reported as started optimistically in a workflow task completion."),
+	)
+	OptimisticActivityResolved = NewCounterDef(
+		"optimistic_activity_resolved",
+		WithDescription("Number of optimistically started activities resolved in the workflow task completion that started them."),
+	)
+	OptimisticActivityHandedOff = NewCounterDef(
+		"optimistic_activity_handed_off",
+		WithDescription("Number of optimistically started activities still running at the end of a workflow task completion and handed off to the server."),
+	)
+	OptimisticTimerStarted = NewCounterDef(
+		"optimistic_timer_started",
+		WithDescription("Number of timers a worker reported as started optimistically in a workflow task completion."),
+	)
+	OptimisticTimerFired = NewCounterDef(
+		"optimistic_timer_fired",
+		WithDescription("Number of optimistically started timers fired in the workflow task completion that started them."),
+	)
+	OptimisticTimerHandedOff = NewCounterDef(
+		"optimistic_timer_handed_off",
+		WithDescription("Number of optimistically started timers still pending at the end of a workflow task completion and handed off to the server."),
+	)
 	// WorkflowEagerExecutionCounter is emitted any time eager workflow start is requested.
 	WorkflowEagerExecutionCounter = NewCounterDef("workflow_eager_execution")
 	// WorkflowEagerExecutionDeniedCounter is emitted any time eager workflow start is requested and the serer fell back

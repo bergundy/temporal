@@ -217,6 +217,12 @@ in the consistent hash ring used by ringpop. Changing it may cause service disru
 		true,
 		`EnableActivityEagerExecution indicates if activity eager execution is enabled per namespace`,
 	)
+	EnableOptimisticStart = NewNamespaceBoolSetting(
+		"system.enableOptimisticStart",
+		false,
+		`EnableOptimisticStart allows workers to start activities and timers optimistically, before the server knows
+about them, and report them in the next workflow task completion. It also sets the optimistic_start namespace capability.`,
+	)
 	EnableActivityEagerDispatchCheck = NewNamespaceBoolSetting(
 		"system.enableActivityEagerDispatchCheck",
 		false,
