@@ -319,7 +319,29 @@ func (b *HistoryBuilder) AddActivityTaskScheduledEvent(
 	command *commandpb.ScheduleActivityTaskCommandAttributes,
 	ns namespace.Name,
 ) (*historypb.HistoryEvent, int64) {
+	return b.addActivityTaskScheduledEvent(b.CreateActivityTaskScheduledEvent(workflowTaskCompletedEventID, command), command, ns)
+}
+
+// AddOptimisticActivityTaskScheduledEvent adds the scheduled event of an activity the worker
+// started optimistically at startTime.
+func (b *HistoryBuilder) AddOptimisticActivityTaskScheduledEvent(
+	workflowTaskCompletedEventID int64,
+	command *commandpb.ScheduleActivityTaskCommandAttributes,
+	startTime time.Time,
+	ns namespace.Name,
+) (*historypb.HistoryEvent, int64) {
 	event := b.CreateActivityTaskScheduledEvent(workflowTaskCompletedEventID, command)
+	event.GetActivityTaskScheduledEventAttributes().OptimisticStart = &historypb.OptimisticStartInfo{
+		StartTime: timestamppb.New(startTime),
+	}
+	return b.addActivityTaskScheduledEvent(event, command, ns)
+}
+
+func (b *HistoryBuilder) addActivityTaskScheduledEvent(
+	event *historypb.HistoryEvent,
+	command *commandpb.ScheduleActivityTaskCommandAttributes,
+	ns namespace.Name,
+) (*historypb.HistoryEvent, int64) {
 	event, batchID := b.add(event)
 
 	if payloadSize := command.Input.Size(); payloadSize > 0 {
@@ -600,6 +622,21 @@ func (b *HistoryBuilder) AddTimerStartedEvent(
 ) *historypb.HistoryEvent {
 	event := b.CreateTimerStartedEvent(workflowTaskCompletedEventID, command)
 
+	event, _ = b.add(event)
+	return event
+}
+
+// AddOptimisticTimerStartedEvent adds the started event of a timer the worker started
+// optimistically at startTime.
+func (b *HistoryBuilder) AddOptimisticTimerStartedEvent(
+	workflowTaskCompletedEventID int64,
+	command *commandpb.StartTimerCommandAttributes,
+	startTime time.Time,
+) *historypb.HistoryEvent {
+	event := b.CreateTimerStartedEvent(workflowTaskCompletedEventID, command)
+	event.GetTimerStartedEventAttributes().OptimisticStart = &historypb.OptimisticStartInfo{
+		StartTime: timestamppb.New(startTime),
+	}
 	event, _ = b.add(event)
 	return event
 }

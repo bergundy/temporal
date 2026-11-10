@@ -41,8 +41,10 @@ func TestOptimisticStartExample(t *testing.T) {
 	act3Command := optimisticActivityCommand(act3, 3352*time.Millisecond)
 	act3Command.GetScheduleActivityTaskCommandAttributes().OptimisticStart.HeartbeatDetails = heartbeatDetails
 
-	// The command list from the "Example" section of the design.
-	resp, wftStartedTime, err := completeOptimisticWorkflowTask(t, env, tv, nil,
+	// The command list from the "Example" section of the design. The worker reports it after 500ms,
+	// so only act3's start offset is later than the checkpoint.
+	resp, wftStartedTime, err := completeOptimisticWorkflowTask(t, env, tv,
+		func() { time.Sleep(500 * time.Millisecond) }, //nolint:forbidigo // The worker runs the commands locally before the checkpoint.
 		optimisticActivityCommand(act1, 10*time.Millisecond),
 		optimisticActivityCommand(act2, 10*time.Millisecond),
 		resolveOptimisticActivityCompletedCommand(6, 200*time.Millisecond, act2.Any().Payloads()),
@@ -61,27 +63,37 @@ func TestOptimisticStartExample(t *testing.T) {
 	require.NotEmpty(t, act3Task.GetTaskToken())
 	protorequire.ProtoEqual(t, heartbeatDetails, act3Task.GetHeartbeatDetails())
 
+	events := env.GetHistory(env.Namespace().String(), execution)
 	historyrequire.New(t).EqualHistoryEvents(fmt.Sprintf(`
   1 WorkflowExecutionStarted
   2 WorkflowTaskScheduled
   3 WorkflowTaskStarted
   4 WorkflowTaskCompleted
-  5 ActivityTaskScheduled {"ActivityId":"%s","OptimisticStart":true}
-  6 ActivityTaskScheduled {"ActivityId":"%s","OptimisticStart":true}
+  5 ActivityTaskScheduled {"ActivityId":"%s","OptimisticStart":{"StartTime":%s}}
+  6 ActivityTaskScheduled {"ActivityId":"%s","OptimisticStart":{"StartTime":%s}}
   7 ActivityTaskStarted {"ScheduledEventId":6,"OptimisticResolution":true}
   8 ActivityTaskCompleted {"ScheduledEventId":6,"StartedEventId":7,"OptimisticResolution":{"WorkflowTime":%s}}
   9 ActivityTaskStarted {"ScheduledEventId":5,"OptimisticResolution":true}
  10 ActivityTaskCompleted {"ScheduledEventId":5,"StartedEventId":9,"OptimisticResolution":{"WorkflowTime":%s}}
- 11 TimerStarted {"TimerId":"3","OptimisticStart":true}
+ 11 TimerStarted {"TimerId":"3","OptimisticStart":{"StartTime":%s}}
  12 TimerFired {"TimerId":"3","StartedEventId":11,"OptimisticResolution":{"WorkflowTime":%s}}
- 13 ActivityTaskScheduled {"ActivityId":"%s","OptimisticStart":true}`,
+ 13 ActivityTaskScheduled {"ActivityId":"%s","OptimisticStart":{}}`,
 		act1.ActivityID(),
+		workflowTimeJSON(wftStartedTime.Add(10*time.Millisecond)),
 		act2.ActivityID(),
+		workflowTimeJSON(wftStartedTime.Add(10*time.Millisecond)),
 		workflowTimeJSON(wftStartedTime.Add(200*time.Millisecond)),
 		workflowTimeJSON(wftStartedTime.Add(350*time.Millisecond)),
+		workflowTimeJSON(wftStartedTime.Add(351*time.Millisecond)),
 		workflowTimeJSON(wftStartedTime.Add(3351*time.Millisecond)),
 		act3.ActivityID(),
-	), env.GetHistory(env.Namespace().String(), execution))
+	), events)
+
+	// act3's start offset is later than the checkpoint, so its start time is capped at the time the
+	// server processed the command: after the completed event and before the scheduled event.
+	act3StartTime := events[12].GetActivityTaskScheduledEventAttributes().GetOptimisticStart().GetStartTime().AsTime()
+	require.False(t, act3StartTime.Before(events[3].GetEventTime().AsTime()))
+	require.False(t, act3StartTime.After(events[12].GetEventTime().AsTime()))
 
 	// The handed off activity is a started activity owned by the server.
 	description, err := env.FrontendClient().DescribeWorkflowExecution(t.Context(), &workflowservice.DescribeWorkflowExecutionRequest{
@@ -123,9 +135,10 @@ func TestOptimisticStartHandoffFailureAppliesRetryPolicy(t *testing.T) {
 		BackoffCoefficient: 1,
 		MaximumAttempts:    2,
 	}
-	resp, _, err := completeOptimisticWorkflowTask(t, env, tv, nil, command)
+	resp, wftStartedTime, err := completeOptimisticWorkflowTask(t, env, tv, nil, command)
 	require.NoError(t, err)
 	require.Len(t, resp.GetOptimisticActivityTasks(), 1)
+	require.Equal(t, wftStartedTime, resp.GetOptimisticActivityTasks()[0].GetScheduledTime().AsTime())
 
 	_, err = env.FrontendClient().RespondActivityTaskFailed(t.Context(), &workflowservice.RespondActivityTaskFailedRequest{
 		Namespace: env.Namespace().String(),
@@ -142,6 +155,8 @@ func TestOptimisticStartHandoffFailureAppliesRetryPolicy(t *testing.T) {
 	_, err = env.TaskPoller().PollAndHandleActivityTask(tv,
 		func(task *workflowservice.PollActivityTaskQueueResponse) (*workflowservice.RespondActivityTaskCompletedRequest, error) {
 			require.Equal(t, int32(2), task.GetAttempt())
+			// The first attempt started at the start offset (0).
+			require.Equal(t, wftStartedTime, task.GetScheduledTime().AsTime())
 			return &workflowservice.RespondActivityTaskCompletedRequest{Result: tv.Any().Payloads()}, nil
 		},
 	)
@@ -152,7 +167,7 @@ func TestOptimisticStartHandoffFailureAppliesRetryPolicy(t *testing.T) {
   2 WorkflowTaskScheduled
   3 WorkflowTaskStarted
   4 WorkflowTaskCompleted
-  5 ActivityTaskScheduled {"OptimisticStart":true}
+  5 ActivityTaskScheduled {"OptimisticStart":{}}
   6 ActivityTaskStarted {"Attempt":2,"OptimisticResolution":false,"LastFailure":{"Message":"optimistic attempt failed"}}
   7 ActivityTaskCompleted {"ScheduledEventId":5,"StartedEventId":6,"OptimisticResolution":null}
   8 WorkflowTaskScheduled`, env.GetHistory(env.Namespace().String(), execution))
@@ -193,15 +208,15 @@ func TestOptimisticStartHandoffStartToCloseTimeout(t *testing.T) {
 			require.Len(t, resp.GetOptimisticActivityTasks(), 1)
 
 			events := awaitHistoryEvent(t, env, execution, enumspb.EVENT_TYPE_ACTIVITY_TASK_TIMED_OUT)
-			historyrequire.New(t).EqualHistoryEvents(`
+			historyrequire.New(t).EqualHistoryEvents(fmt.Sprintf(`
   1 WorkflowExecutionStarted
   2 WorkflowTaskScheduled
   3 WorkflowTaskStarted
   4 WorkflowTaskCompleted
-  5 ActivityTaskScheduled {"OptimisticStart":true}
+  5 ActivityTaskScheduled {"OptimisticStart":{"StartTime":%s}}
   6 ActivityTaskStarted {"OptimisticResolution":false}
   7 ActivityTaskTimedOut {"ScheduledEventId":5,"StartedEventId":6}
-  8 WorkflowTaskScheduled`, events)
+  8 WorkflowTaskScheduled`, workflowTimeJSON(wftStartedTime)), events)
 			require.Equal(t, enumspb.TIMEOUT_TYPE_START_TO_CLOSE,
 				events[6].GetActivityTaskTimedOutEventAttributes().GetFailure().GetTimeoutFailureInfo().GetTimeoutType())
 
@@ -278,13 +293,13 @@ func TestOptimisticStartCancel(t *testing.T) {
   2 WorkflowTaskScheduled
   3 WorkflowTaskStarted
   4 WorkflowTaskCompleted
-  5 ActivityTaskScheduled {"OptimisticStart":true}
-  6 TimerStarted {"OptimisticStart":true}
+  5 ActivityTaskScheduled {"OptimisticStart":{}}
+  6 TimerStarted {"OptimisticStart":{}}
   7 TimerCanceled {"StartedEventId":6}
   8 ActivityTaskCancelRequested {"ScheduledEventId":5}
   9 ActivityTaskStarted {"ScheduledEventId":5,"OptimisticResolution":true}
  10 ActivityTaskCanceled {"ScheduledEventId":5,"StartedEventId":9,"LatestCancelRequestedEventId":8,"OptimisticResolution":{"WorkflowTime":%s}}
- 11 ActivityTaskScheduled {"OptimisticStart":true}
+ 11 ActivityTaskScheduled {"OptimisticStart":{}}
  12 ActivityTaskCancelRequested {"ScheduledEventId":11}`,
 		workflowTimeJSON(wftStartedTime.Add(100*time.Millisecond)),
 	), env.GetHistory(env.Namespace().String(), execution))
@@ -616,15 +631,21 @@ func TestOptimisticStartRebuildMutableState(t *testing.T) {
 	tv := env.Tv()
 	execution := startOptimisticStartWorkflow(t, env, tv)
 
-	_, _, err := completeOptimisticWorkflowTask(t, env, tv, nil,
-		optimisticActivityCommand(tv, 0),
-		resolveOptimisticActivityCompletedCommand(optimisticFirstCommandEventID, time.Millisecond, tv.Any().Payloads()),
-		optimisticTimerCommand("optimistic", time.Second, 2*time.Millisecond),
-		fireOptimisticTimerCommand("optimistic", 3*time.Millisecond),
-		optimisticActivityCommand(tv.WithActivityIDNumber(1), 4*time.Millisecond),
-		requestCancelActivityCommand(optimisticFirstCommandEventID+5),
-		resolveOptimisticActivityCanceledCommand(optimisticFirstCommandEventID+5, 5*time.Millisecond),
-		&commandpb.Command{
+	handedOffActivity := optimisticActivityCommand(tv.WithActivityIDNumber(2), 80*time.Millisecond)
+	handedOffActivity.GetScheduleActivityTaskCommandAttributes().StartToCloseTimeout = durationpb.New(time.Hour)
+	// The worker reports the commands after their start offsets, so none of the start times is capped.
+	resp, wftStartedTime, err := completeOptimisticWorkflowTask(t, env, tv,
+		func() { time.Sleep(200 * time.Millisecond) },                                          //nolint:forbidigo // The worker runs the commands locally before the checkpoint.
+		optimisticActivityCommand(tv, 10*time.Millisecond),                                     // 5
+		resolveOptimisticActivityCompletedCommand(5, 20*time.Millisecond, tv.Any().Payloads()), // 6, 7
+		optimisticTimerCommand("fired", time.Hour, 30*time.Millisecond),                        // 8
+		fireOptimisticTimerCommand("fired", 40*time.Millisecond),                               // 9
+		optimisticActivityCommand(tv.WithActivityIDNumber(1), 50*time.Millisecond),             // 10
+		requestCancelActivityCommand(10),                                                       // 11
+		resolveOptimisticActivityCanceledCommand(10, 60*time.Millisecond),                      // 12, 13
+		optimisticTimerCommand("handed-off", time.Hour, 70*time.Millisecond),                   // 14
+		handedOffActivity, // 15
+		&commandpb.Command{ // 16
 			CommandType: enumspb.COMMAND_TYPE_START_TIMER,
 			Attributes: &commandpb.Command_StartTimerCommandAttributes{StartTimerCommandAttributes: &commandpb.StartTimerCommandAttributes{
 				TimerId:            "pending",
@@ -633,6 +654,7 @@ func TestOptimisticStartRebuildMutableState(t *testing.T) {
 		},
 	)
 	require.NoError(t, err)
+	require.Len(t, resp.GetOptimisticActivityTasks(), 1)
 
 	describe := func() *adminservice.DescribeMutableStateResponse {
 		resp, err := env.AdminClient().DescribeMutableState(t.Context(), &adminservice.DescribeMutableStateRequest{
@@ -643,28 +665,40 @@ func TestOptimisticStartRebuildMutableState(t *testing.T) {
 		require.NoError(t, err)
 		return resp
 	}
-	before := describe()
+	before := describe().GetDatabaseMutableState()
 	_, err = env.AdminClient().RebuildMutableState(t.Context(), &adminservice.RebuildMutableStateRequest{
 		Namespace: env.Namespace().String(),
 		Execution: execution,
 	})
 	require.NoError(t, err)
-	after := describe()
+	after := describe().GetDatabaseMutableState()
 
-	require.Equal(t, int64(15), before.GetDatabaseMutableState().GetNextEventId())
-	require.Equal(t, before.GetDatabaseMutableState().GetNextEventId(), after.GetDatabaseMutableState().GetNextEventId())
-	protorequire.ProtoEqual(t,
-		before.GetDatabaseMutableState().GetExecutionInfo().GetVersionHistories(),
-		after.GetDatabaseMutableState().GetExecutionInfo().GetVersionHistories(),
+	require.Equal(t, int64(17), before.GetNextEventId())
+	require.Equal(t, before.GetNextEventId(), after.GetNextEventId())
+	protorequire.ProtoEqual(t, before.GetExecutionInfo().GetVersionHistories(), after.GetExecutionInfo().GetVersionHistories())
+
+	// The handed off activity and timer count from their backdated starts on the active cluster, and
+	// state rebuilt from history reproduces those times.
+	const handedOffActivityScheduledEventID = 15
+	require.Len(t, before.GetActivityInfos(), 1)
+	require.Len(t, after.GetActivityInfos(), 1)
+	beforeActivity := before.GetActivityInfos()[handedOffActivityScheduledEventID]
+	afterActivity := after.GetActivityInfos()[handedOffActivityScheduledEventID]
+	require.Equal(t, wftStartedTime.Add(80*time.Millisecond), beforeActivity.GetScheduledTime().AsTime())
+	protorequire.ProtoEqual(t, beforeActivity.GetScheduledTime(), afterActivity.GetScheduledTime())
+	protorequire.ProtoEqual(t, beforeActivity.GetFirstScheduledTime(), afterActivity.GetFirstScheduledTime())
+	protorequire.ProtoEqual(t, beforeActivity.GetRetryExpirationTime(), afterActivity.GetRetryExpirationTime())
+
+	require.Len(t, before.GetTimerInfos(), 2)
+	require.Len(t, after.GetTimerInfos(), 2)
+	require.Equal(t,
+		wftStartedTime.Add(70*time.Millisecond).Add(time.Hour),
+		before.GetTimerInfos()["handed-off"].GetExpiryTime().AsTime(),
 	)
-	require.Empty(t, before.GetDatabaseMutableState().GetActivityInfos())
-	require.Empty(t, after.GetDatabaseMutableState().GetActivityInfos())
-	require.Len(t, before.GetDatabaseMutableState().GetTimerInfos(), 1)
-	require.Len(t, after.GetDatabaseMutableState().GetTimerInfos(), 1)
-	beforeTimer := before.GetDatabaseMutableState().GetTimerInfos()["pending"]
-	afterTimer := after.GetDatabaseMutableState().GetTimerInfos()["pending"]
-	require.Equal(t, beforeTimer.GetStartedEventId(), afterTimer.GetStartedEventId())
-	protorequire.ProtoEqual(t, beforeTimer.GetExpiryTime(), afterTimer.GetExpiryTime())
+	for _, timerID := range []string{"handed-off", "pending"} {
+		require.Equal(t, before.GetTimerInfos()[timerID].GetStartedEventId(), after.GetTimerInfos()[timerID].GetStartedEventId())
+		protorequire.ProtoEqual(t, before.GetTimerInfos()[timerID].GetExpiryTime(), after.GetTimerInfos()[timerID].GetExpiryTime())
+	}
 }
 
 func newOptimisticStartEnv(t *testing.T) *testcore.TestEnv {

@@ -9896,6 +9896,37 @@ func (s *mutableStateSuite) TestAddActivityTaskScheduledEvent_ScheduledEventBatc
 	s.Equal(event.GetEventId(), activityInfo.ScheduledEventBatchId)
 }
 
+func (s *mutableStateSuite) TestAddOptimisticStartEvents_TimesCountFromStartTime() {
+	tq, completedEvent := s.scheduleCompletedWFTForBatchIDTest()
+	startTime := s.mutableState.Now().Add(-time.Second)
+
+	scheduledEvent, activityInfo, err := s.mutableState.AddOptimisticActivityTaskScheduledEvent(
+		completedEvent.GetEventId(),
+		&commandpb.ScheduleActivityTaskCommandAttributes{
+			ActivityId:             "act-1",
+			ActivityType:           &commonpb.ActivityType{Name: "activity-type"},
+			TaskQueue:              tq,
+			ScheduleToCloseTimeout: durationpb.New(time.Minute),
+			RetryPolicy:            &commonpb.RetryPolicy{},
+		},
+		startTime,
+	)
+	s.NoError(err)
+	protorequire.ProtoEqual(s.T(), timestamppb.New(startTime), scheduledEvent.GetActivityTaskScheduledEventAttributes().GetOptimisticStart().GetStartTime())
+	s.Equal(startTime, activityInfo.GetScheduledTime().AsTime())
+	s.Equal(startTime, activityInfo.GetFirstScheduledTime().AsTime())
+	s.Equal(startTime.Add(time.Minute), activityInfo.GetRetryExpirationTime().AsTime())
+
+	timerStartedEvent, timerInfo, err := s.mutableState.AddOptimisticTimerStartedEvent(
+		completedEvent.GetEventId(),
+		&commandpb.StartTimerCommandAttributes{TimerId: "timer-1", StartToFireTimeout: durationpb.New(time.Minute)},
+		startTime,
+	)
+	s.NoError(err)
+	protorequire.ProtoEqual(s.T(), timestamppb.New(startTime), timerStartedEvent.GetTimerStartedEventAttributes().GetOptimisticStart().GetStartTime())
+	s.Equal(startTime.Add(time.Minute), timerInfo.GetExpiryTime().AsTime())
+}
+
 func (s *mutableStateSuite) TestGenerateEventLoadToken_MultiBatch() {
 	_, completedEvent := s.scheduleCompletedWFTForBatchIDTest()
 

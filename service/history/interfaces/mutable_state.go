@@ -56,6 +56,10 @@ type (
 		AddActivityTaskCompletedEvent(int64, int64, *workflowservice.RespondActivityTaskCompletedRequest) (*historypb.HistoryEvent, error)
 		AddActivityTaskFailedEvent(int64, int64, *failurepb.Failure, enumspb.RetryState, string, *commonpb.WorkerVersionStamp) (*historypb.HistoryEvent, error)
 		AddActivityTaskScheduledEvent(int64, *commandpb.ScheduleActivityTaskCommandAttributes, bool) (*historypb.HistoryEvent, *persistencespb.ActivityInfo, error)
+		// AddOptimisticActivityTaskScheduledEvent schedules an activity the worker started
+		// optimistically at startTime, without generating an activity task. The scheduled event
+		// records startTime, which the activity's scheduled times are taken from.
+		AddOptimisticActivityTaskScheduledEvent(workflowTaskCompletedEventID int64, command *commandpb.ScheduleActivityTaskCommandAttributes, startTime time.Time) (*historypb.HistoryEvent, *persistencespb.ActivityInfo, error)
 		AddActivityTaskStartedEvent(
 			*persistencespb.ActivityInfo,
 			int64,
@@ -111,6 +115,9 @@ type (
 		AddTimerCanceledEvent(int64, *commandpb.CancelTimerCommandAttributes, string) (*historypb.HistoryEvent, error)
 		AddTimerFiredEvent(string) (*historypb.HistoryEvent, error)
 		AddTimerStartedEvent(int64, *commandpb.StartTimerCommandAttributes) (*historypb.HistoryEvent, *persistencespb.TimerInfo, error)
+		// AddOptimisticTimerStartedEvent starts a timer the worker started optimistically at
+		// startTime. The started event records startTime, which the timer's expiry counts from.
+		AddOptimisticTimerStartedEvent(workflowTaskCompletedEventID int64, command *commandpb.StartTimerCommandAttributes, startTime time.Time) (*historypb.HistoryEvent, *persistencespb.TimerInfo, error)
 		AddUpsertWorkflowSearchAttributesEvent(int64, *commandpb.UpsertWorkflowSearchAttributesCommandAttributes) (*historypb.HistoryEvent, error)
 		AddWorkflowPropertiesModifiedEvent(int64, *commandpb.ModifyWorkflowPropertiesCommandAttributes) (*historypb.HistoryEvent, error)
 		AddWorkflowExecutionCancelRequestedEvent(*historyservice.RequestCancelWorkflowExecutionRequest) (*historypb.HistoryEvent, error)

@@ -2340,11 +2340,12 @@ func (s *historyBuilderSuite) TestBufferEvent() {
 func (s *historyBuilderSuite) TestOptimisticResolutionsAreAppendedInOrder() {
 	workflowTaskCompletedEventID := rand.Int63()
 	workflowTime := s.now.Add(time.Second)
-	optimisticStart := &commandpb.OptimisticStart{StartOffset: durationpb.New(time.Millisecond)}
+	optimisticStartTime := s.now.Add(-2 * time.Second)
 
-	scheduledEvent, _ := s.historyBuilder.AddActivityTaskScheduledEvent(
+	scheduledEvent, _ := s.historyBuilder.AddOptimisticActivityTaskScheduledEvent(
 		workflowTaskCompletedEventID,
-		&commandpb.ScheduleActivityTaskCommandAttributes{ActivityId: "activity", OptimisticStart: optimisticStart},
+		&commandpb.ScheduleActivityTaskCommandAttributes{ActivityId: "activity"},
+		optimisticStartTime,
 		defaultNamespace,
 	)
 	signalEvent := s.historyBuilder.AddWorkflowExecutionSignaledEvent(
@@ -2357,9 +2358,10 @@ func (s *historyBuilderSuite) TestOptimisticResolutionsAreAppendedInOrder() {
 	completedEvent := s.historyBuilder.AddOptimisticActivityTaskCompletedEvent(
 		scheduledEvent.GetEventId(), startedEvent.GetEventId(), testIdentity, testPayloads, workflowTime, defaultNamespace,
 	)
-	timerStartedEvent := s.historyBuilder.AddTimerStartedEvent(
+	timerStartedEvent := s.historyBuilder.AddOptimisticTimerStartedEvent(
 		workflowTaskCompletedEventID,
-		&commandpb.StartTimerCommandAttributes{TimerId: "timer", OptimisticStart: optimisticStart},
+		&commandpb.StartTimerCommandAttributes{TimerId: "timer"},
+		optimisticStartTime,
 	)
 	timerFiredEvent := s.historyBuilder.AddOptimisticTimerFiredEvent(
 		timerStartedEvent.GetEventId(), "timer", workflowTime,
@@ -2388,8 +2390,16 @@ func (s *historyBuilderSuite) TestOptimisticResolutionsAreAppendedInOrder() {
 		s.Equal(s.nextEventID+int64(i), event.GetEventId())
 	}
 
-	s.True(scheduledEvent.GetActivityTaskScheduledEventAttributes().GetOptimisticStart())
-	s.True(timerStartedEvent.GetTimerStartedEventAttributes().GetOptimisticStart())
+	// The events keep the server's time and record the time the worker started the commands.
+	protorequire.ProtoEqual(s.T(), timestamppb.New(s.now), scheduledEvent.GetEventTime())
+	protorequire.ProtoEqual(s.T(),
+		&historypb.OptimisticStartInfo{StartTime: timestamppb.New(optimisticStartTime)},
+		scheduledEvent.GetActivityTaskScheduledEventAttributes().GetOptimisticStart(),
+	)
+	protorequire.ProtoEqual(s.T(),
+		&historypb.OptimisticStartInfo{StartTime: timestamppb.New(optimisticStartTime)},
+		timerStartedEvent.GetTimerStartedEventAttributes().GetOptimisticStart(),
+	)
 	s.True(startedEvent.GetActivityTaskStartedEventAttributes().GetOptimisticResolution())
 	protorequire.ProtoEqual(s.T(), startedTime, startedEvent.GetEventTime())
 	s.Equal(startedEvent.GetEventId(), completedEvent.GetActivityTaskCompletedEventAttributes().GetStartedEventId())

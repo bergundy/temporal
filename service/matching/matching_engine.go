@@ -3571,6 +3571,11 @@ func (e *matchingEngineImpl) createPollActivityTaskQueueResponse(
 	if scheduleToCloseTimeout == nil {
 		scheduleToCloseTimeout = timestamp.DurationPtr(0)
 	}
+	scheduledTime := scheduledEvent.EventTime
+	if startTime := attributes.GetOptimisticStart().GetStartTime(); startTime != nil {
+		// The worker started the first attempt optimistically, before the server knew about it.
+		scheduledTime = startTime
+	}
 
 	return &matchingservice.PollActivityTaskQueueResponse{
 		ActivityId:                          attributes.ActivityId,
@@ -3580,7 +3585,7 @@ func (e *matchingEngineImpl) createPollActivityTaskQueueResponse(
 		Input:                               attributes.Input,
 		WorkflowExecution:                   task.workflowExecution(),
 		CurrentAttemptScheduledTime:         historyResponse.CurrentAttemptScheduledTime,
-		ScheduledTime:                       scheduledEvent.EventTime,
+		ScheduledTime:                       scheduledTime,
 		ScheduleToCloseTimeout:              scheduleToCloseTimeout,
 		StartedTime:                         historyResponse.StartedTime,
 		StartToCloseTimeout:                 attributes.StartToCloseTimeout,

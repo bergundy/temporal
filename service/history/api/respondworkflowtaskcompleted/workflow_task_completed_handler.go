@@ -611,26 +611,29 @@ func (handler *workflowTaskCompletedHandler) handleCommandScheduleActivity(
 		bypassActivityTaskGeneration = true
 		eagerStartActivity = false
 	}
-	// An optimistically started activity is already running on the worker that completed this workflow task.
 	if optimisticStart != nil {
-		bypassActivityTaskGeneration = true
-		eagerStartActivity = false
+		// The activity already runs on the worker that completed this workflow task.
+		event, ai, err := handler.mutableState.AddOptimisticActivityTaskScheduledEvent(
+			handler.workflowTaskCompletedID,
+			attr,
+			optimisticStartTime,
+		)
+		if err != nil {
+			return nil, nil, handler.failWorkflowTaskOnInvalidArgument(enumspb.WORKFLOW_TASK_FAILED_CAUSE_SCHEDULE_ACTIVITY_DUPLICATE_ID, err)
+		}
+		if err := handler.startOptimisticActivity(attr, ai, optimisticStartTime); err != nil {
+			return nil, nil, err
+		}
+		return event, &handleCommandResponse{}, nil
 	}
 
-	event, ai, err := handler.mutableState.AddActivityTaskScheduledEvent(
+	event, _, err := handler.mutableState.AddActivityTaskScheduledEvent(
 		handler.workflowTaskCompletedID,
 		attr,
 		bypassActivityTaskGeneration,
 	)
 	if err != nil {
 		return nil, nil, handler.failWorkflowTaskOnInvalidArgument(enumspb.WORKFLOW_TASK_FAILED_CAUSE_SCHEDULE_ACTIVITY_DUPLICATE_ID, err)
-	}
-
-	if optimisticStart != nil {
-		if err := handler.startOptimisticActivity(attr, ai, optimisticStartTime); err != nil {
-			return nil, nil, err
-		}
-		return event, &handleCommandResponse{}, nil
 	}
 
 	if !eagerStartActivity {
@@ -1018,20 +1021,22 @@ func (handler *workflowTaskCompletedHandler) handleCommandStartTimer(
 		optimisticStartTime = handler.backdatedTime(workflowTime)
 	}
 
-	event, ti, err := handler.mutableState.AddTimerStartedEvent(handler.workflowTaskCompletedID, attr)
+	if optimisticStart == nil {
+		event, _, err := handler.mutableState.AddTimerStartedEvent(handler.workflowTaskCompletedID, attr)
+		if err != nil {
+			return nil, handler.failWorkflowTaskOnInvalidArgument(enumspb.WORKFLOW_TASK_FAILED_CAUSE_START_TIMER_DUPLICATE_ID, err)
+		}
+		return event, nil
+	}
+
+	// The timer expires at the backdated start plus its duration. The user timer task is generated
+	// when the transaction closes.
+	event, _, err := handler.mutableState.AddOptimisticTimerStartedEvent(handler.workflowTaskCompletedID, attr, optimisticStartTime)
 	if err != nil {
 		return nil, handler.failWorkflowTaskOnInvalidArgument(enumspb.WORKFLOW_TASK_FAILED_CAUSE_START_TIMER_DUPLICATE_ID, err)
 	}
-
-	if optimisticStart != nil {
-		// The user timer task is generated when the transaction closes, so it uses the backdated expiry.
-		ti.ExpiryTime = timestamppb.New(optimisticStartTime.Add(attr.GetStartToFireTimeout().AsDuration()))
-		if err := handler.mutableState.UpdateUserTimer(ti); err != nil {
-			return nil, err
-		}
-		handler.optimisticTimers[attr.GetTimerId()] = event.GetEventId()
-		metrics.OptimisticTimerStarted.With(handler.metricsHandler).Record(1)
-	}
+	handler.optimisticTimers[attr.GetTimerId()] = event.GetEventId()
+	metrics.OptimisticTimerStarted.With(handler.metricsHandler).Record(1)
 	return event, nil
 }
 
@@ -1070,7 +1075,8 @@ func (handler *workflowTaskCompletedHandler) backdatedTime(workflowTime time.Tim
 }
 
 // startOptimisticActivity records the start of an activity the worker started optimistically, with
-// scheduled and started times backdated to when the worker started it.
+// the started time backdated to when the worker started it. The scheduled times are already
+// backdated by the scheduled event.
 func (handler *workflowTaskCompletedHandler) startOptimisticActivity(
 	attr *commandpb.ScheduleActivityTaskCommandAttributes,
 	ai *persistencespb.ActivityInfo,
@@ -1080,12 +1086,7 @@ func (handler *workflowTaskCompletedHandler) startOptimisticActivity(
 		return err
 	}
 	if err := handler.mutableState.UpdateActivity(ai.GetScheduledEventId(), func(ai *persistencespb.ActivityInfo, _ historyi.MutableState) error {
-		ai.ScheduledTime = timestamppb.New(startTime)
-		ai.FirstScheduledTime = timestamppb.New(startTime)
 		ai.StartedTime = timestamppb.New(startTime)
-		if ai.RetryExpirationTime != nil {
-			ai.RetryExpirationTime = timestamppb.New(startTime.Add(ai.GetScheduleToCloseTimeout().AsDuration()))
-		}
 		return nil
 	}); err != nil {
 		return err

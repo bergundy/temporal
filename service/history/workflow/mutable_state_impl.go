@@ -4401,6 +4401,24 @@ func (ms *MutableStateImpl) AddActivityTaskScheduledEvent(
 	command *commandpb.ScheduleActivityTaskCommandAttributes,
 	bypassTaskGeneration bool,
 ) (*historypb.HistoryEvent, *persistencespb.ActivityInfo, error) {
+	return ms.addActivityTaskScheduledEvent(workflowTaskCompletedEventID, command, nil, bypassTaskGeneration)
+}
+
+func (ms *MutableStateImpl) AddOptimisticActivityTaskScheduledEvent(
+	workflowTaskCompletedEventID int64,
+	command *commandpb.ScheduleActivityTaskCommandAttributes,
+	startTime time.Time,
+) (*historypb.HistoryEvent, *persistencespb.ActivityInfo, error) {
+	// The activity already runs on the worker, so no activity task is generated.
+	return ms.addActivityTaskScheduledEvent(workflowTaskCompletedEventID, command, &startTime, true)
+}
+
+func (ms *MutableStateImpl) addActivityTaskScheduledEvent(
+	workflowTaskCompletedEventID int64,
+	command *commandpb.ScheduleActivityTaskCommandAttributes,
+	optimisticStartTime *time.Time,
+	bypassTaskGeneration bool,
+) (*historypb.HistoryEvent, *persistencespb.ActivityInfo, error) {
 	opTag := tag.WorkflowActionActivityTaskScheduled
 	if err := ms.checkMutability(opTag); err != nil {
 		return nil, nil, err
@@ -4414,7 +4432,13 @@ func (ms *MutableStateImpl) AddActivityTaskScheduledEvent(
 		return nil, nil, ms.createCallerError(opTag, "ActivityID: "+command.GetActivityId())
 	}
 
-	event, batchID := ms.hBuilder.AddActivityTaskScheduledEvent(workflowTaskCompletedEventID, command, ms.namespaceEntry.Name())
+	var event *historypb.HistoryEvent
+	var batchID int64
+	if optimisticStartTime != nil {
+		event, batchID = ms.hBuilder.AddOptimisticActivityTaskScheduledEvent(workflowTaskCompletedEventID, command, *optimisticStartTime, ms.namespaceEntry.Name())
+	} else {
+		event, batchID = ms.hBuilder.AddActivityTaskScheduledEvent(workflowTaskCompletedEventID, command, ms.namespaceEntry.Name())
+	}
 	ai, err := ms.ApplyActivityTaskScheduledEvent(batchID, event)
 	// TODO merge active & passive task generation
 	if !bypassTaskGeneration {
@@ -4441,13 +4465,18 @@ func (ms *MutableStateImpl) ApplyActivityTaskScheduledEvent(
 
 	scheduledEventID := event.GetEventId()
 	scheduleToCloseTimeout := attributes.GetScheduleToCloseTimeout()
+	scheduledTime := event.GetEventTime()
+	if startTime := attributes.GetOptimisticStart().GetStartTime(); startTime != nil {
+		// The worker started the activity before the server knew about it. Timeouts count from then.
+		scheduledTime = startTime
+	}
 
 	ai := &persistencespb.ActivityInfo{
 		Version:                 event.GetVersion(),
 		ScheduledEventId:        scheduledEventID,
 		ScheduledEventBatchId:   batchID,
-		ScheduledTime:           event.GetEventTime(),
-		FirstScheduledTime:      event.GetEventTime(),
+		ScheduledTime:           scheduledTime,
+		FirstScheduledTime:      scheduledTime,
 		StartedEventId:          common.EmptyEventID,
 		StartVersion:            common.EmptyVersion,
 		StartedTime:             nil,
@@ -5718,6 +5747,22 @@ func (ms *MutableStateImpl) AddTimerStartedEvent(
 	workflowTaskCompletedEventID int64,
 	command *commandpb.StartTimerCommandAttributes,
 ) (*historypb.HistoryEvent, *persistencespb.TimerInfo, error) {
+	return ms.addTimerStartedEvent(workflowTaskCompletedEventID, command, nil)
+}
+
+func (ms *MutableStateImpl) AddOptimisticTimerStartedEvent(
+	workflowTaskCompletedEventID int64,
+	command *commandpb.StartTimerCommandAttributes,
+	startTime time.Time,
+) (*historypb.HistoryEvent, *persistencespb.TimerInfo, error) {
+	return ms.addTimerStartedEvent(workflowTaskCompletedEventID, command, &startTime)
+}
+
+func (ms *MutableStateImpl) addTimerStartedEvent(
+	workflowTaskCompletedEventID int64,
+	command *commandpb.StartTimerCommandAttributes,
+	optimisticStartTime *time.Time,
+) (*historypb.HistoryEvent, *persistencespb.TimerInfo, error) {
 	opTag := tag.WorkflowActionTimerStarted
 	if err := ms.checkMutability(opTag); err != nil {
 		return nil, nil, err
@@ -5733,7 +5778,12 @@ func (ms *MutableStateImpl) AddTimerStartedEvent(
 		return nil, nil, ms.createCallerError(opTag, "TimerID: "+command.GetTimerId())
 	}
 
-	event := ms.hBuilder.AddTimerStartedEvent(workflowTaskCompletedEventID, command)
+	var event *historypb.HistoryEvent
+	if optimisticStartTime != nil {
+		event = ms.hBuilder.AddOptimisticTimerStartedEvent(workflowTaskCompletedEventID, command, *optimisticStartTime)
+	} else {
+		event = ms.hBuilder.AddTimerStartedEvent(workflowTaskCompletedEventID, command)
+	}
 	ti, err := ms.ApplyTimerStartedEvent(event)
 	if err != nil {
 		return nil, nil, err
@@ -5748,8 +5798,13 @@ func (ms *MutableStateImpl) ApplyTimerStartedEvent(
 	timerID := attributes.GetTimerId()
 
 	startToFireTimeout := attributes.GetStartToFireTimeout().AsDuration()
+	startTime := event.GetEventTime()
+	if optimisticStartTime := attributes.GetOptimisticStart().GetStartTime(); optimisticStartTime != nil {
+		// The worker started the timer before the server knew about it.
+		startTime = optimisticStartTime
+	}
 	// TODO: Time skew needs to be taken in to account.
-	expiryTime := timestamp.TimeValue(event.GetEventTime()).Add(startToFireTimeout)
+	expiryTime := timestamp.TimeValue(startTime).Add(startToFireTimeout)
 
 	ti := &persistencespb.TimerInfo{
 		Version:        event.GetVersion(),

@@ -440,6 +440,22 @@ func (mr *MockMutableStateMockRecorder) AddOptimisticActivityTaskCompletedEvent(
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddOptimisticActivityTaskCompletedEvent", reflect.TypeOf((*MockMutableState)(nil).AddOptimisticActivityTaskCompletedEvent), scheduledEventID, identity, result, workflowTime)
 }
 
+// AddOptimisticActivityTaskScheduledEvent mocks base method.
+func (m *MockMutableState) AddOptimisticActivityTaskScheduledEvent(workflowTaskCompletedEventID int64, arg1 *command.ScheduleActivityTaskCommandAttributes, startTime time.Time) (*history.HistoryEvent, *persistence.ActivityInfo, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AddOptimisticActivityTaskScheduledEvent", workflowTaskCompletedEventID, arg1, startTime)
+	ret0, _ := ret[0].(*history.HistoryEvent)
+	ret1, _ := ret[1].(*persistence.ActivityInfo)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// AddOptimisticActivityTaskScheduledEvent indicates an expected call of AddOptimisticActivityTaskScheduledEvent.
+func (mr *MockMutableStateMockRecorder) AddOptimisticActivityTaskScheduledEvent(workflowTaskCompletedEventID, arg1, startTime any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddOptimisticActivityTaskScheduledEvent", reflect.TypeOf((*MockMutableState)(nil).AddOptimisticActivityTaskScheduledEvent), workflowTaskCompletedEventID, arg1, startTime)
+}
+
 // AddOptimisticTimerFiredEvent mocks base method.
 func (m *MockMutableState) AddOptimisticTimerFiredEvent(timerID string, workflowTime time.Time) (*history.HistoryEvent, error) {
 	m.ctrl.T.Helper()
@@ -453,6 +469,22 @@ func (m *MockMutableState) AddOptimisticTimerFiredEvent(timerID string, workflow
 func (mr *MockMutableStateMockRecorder) AddOptimisticTimerFiredEvent(timerID, workflowTime any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddOptimisticTimerFiredEvent", reflect.TypeOf((*MockMutableState)(nil).AddOptimisticTimerFiredEvent), timerID, workflowTime)
+}
+
+// AddOptimisticTimerStartedEvent mocks base method.
+func (m *MockMutableState) AddOptimisticTimerStartedEvent(workflowTaskCompletedEventID int64, arg1 *command.StartTimerCommandAttributes, startTime time.Time) (*history.HistoryEvent, *persistence.TimerInfo, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "AddOptimisticTimerStartedEvent", workflowTaskCompletedEventID, arg1, startTime)
+	ret0, _ := ret[0].(*history.HistoryEvent)
+	ret1, _ := ret[1].(*persistence.TimerInfo)
+	ret2, _ := ret[2].(error)
+	return ret0, ret1, ret2
+}
+
+// AddOptimisticTimerStartedEvent indicates an expected call of AddOptimisticTimerStartedEvent.
+func (mr *MockMutableStateMockRecorder) AddOptimisticTimerStartedEvent(workflowTaskCompletedEventID, arg1, startTime any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddOptimisticTimerStartedEvent", reflect.TypeOf((*MockMutableState)(nil).AddOptimisticTimerStartedEvent), workflowTaskCompletedEventID, arg1, startTime)
 }
 
 // AddReapplyCandidateEvent mocks base method.

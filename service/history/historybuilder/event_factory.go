@@ -248,7 +248,6 @@ func (b *EventFactory) CreateActivityTaskScheduledEvent(
 			RetryPolicy:                  command.RetryPolicy,
 			UseWorkflowBuildId:           command.UseWorkflowBuildId,
 			Priority:                     command.Priority,
-			OptimisticStart:              command.GetOptimisticStart() != nil,
 		},
 	}
 	return event
@@ -517,7 +516,6 @@ func (b *EventFactory) CreateTimerStartedEvent(
 			WorkflowTaskCompletedEventId: workflowTaskCompletedEventID,
 			TimerId:                      command.TimerId,
 			StartToFireTimeout:           command.StartToFireTimeout,
-			OptimisticStart:              command.GetOptimisticStart() != nil,
 		},
 	}
 	return event
