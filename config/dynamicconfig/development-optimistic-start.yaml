@@ -1,0 +1,20 @@
+# Dynamic config for running a development server with optimistic start enabled, for example for
+# SDK end-to-end tests. Used by config/development-sqlite-optimistic-start.yaml.
+system.enableOptimisticStart:
+  - value: true
+system.forceSearchAttributesCacheRefreshOnRead:
+  - value: true
+system.enableEagerWorkflowStart:
+  - value: true
+frontend.enableExecuteMultiOperation:
+  - value: true
+frontend.workerVersioningWorkflowAPIs:
+  - value: true
+frontend.workerVersioningDataAPIs:
+  - value: true
+system.enableDeploymentVersions:
+  - value: true
+frontend.activityAPIsEnabled:
+  - value: true
+limit.maxIDLength:
+  - value: 255
