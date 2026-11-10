@@ -18,3 +18,5 @@ frontend.activityAPIsEnabled:
   - value: true
 limit.maxIDLength:
   - value: 255
+limit.historyCount.suggestContinueAsNew:
+  - value: 50
