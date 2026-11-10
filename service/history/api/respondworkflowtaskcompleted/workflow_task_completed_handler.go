@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -37,6 +38,7 @@ import (
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/payload"
 	"go.temporal.io/server/common/payloads"
+	"go.temporal.io/server/common/primitives/timestamp"
 	"go.temporal.io/server/common/protocol"
 	"go.temporal.io/server/common/searchattribute"
 	"go.temporal.io/server/common/tasktoken"
@@ -47,6 +49,8 @@ import (
 	"go.temporal.io/server/service/history/workflow"
 	"go.temporal.io/server/service/history/workflow/update"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 const (
@@ -74,6 +78,12 @@ type (
 		updateRegistry                      update.Registry
 		pendingWorkerCommandsByControlQueue map[string][]*workerpb.WorkerCommand // Batched worker commands by control queue
 		eagerActivityCandidates             []eagerActivityCandidate
+
+		// Optimistic start state. Offsets reported by the worker are relative to workflowTaskStartedTime.
+		workflowTaskStartedTime time.Time
+		lastOptimisticOffset    time.Duration
+		optimisticActivities    []optimisticActivity // In command order.
+		optimisticTimers        map[string]int64     // Timer ID to started event ID.
 
 		// validation
 		attrValidator                  *api.CommandAttrValidator
@@ -112,12 +122,19 @@ type (
 		activityInfo     *persistencespb.ActivityInfo
 		granted          bool
 	}
+
+	// optimisticActivity is an activity started optimistically in the command list being handled.
+	optimisticActivity struct {
+		scheduledEventID int64
+		attr             *commandpb.ScheduleActivityTaskCommandAttributes
+	}
 )
 
 func newWorkflowTaskCompletedHandler(
 	identity string,
 	workerControlTaskQueue string,
 	workflowTaskCompletedID int64,
+	workflowTaskStartedTime time.Time,
 	workflowTaskDeployment *deploymentpb.Deployment,
 	mutableState historyi.MutableState,
 	updateRegistry update.Registry,
@@ -152,6 +169,8 @@ func newWorkflowTaskCompletedHandler(
 		effects:                         effects,
 		initiatedChildExecutionsInBatch: make(map[string]struct{}),
 		updateRegistry:                  updateRegistry,
+		workflowTaskStartedTime:         workflowTaskStartedTime,
+		optimisticTimers:                make(map[string]int64),
 
 		// validation
 		attrValidator:                  attrValidator,
@@ -216,6 +235,14 @@ func (handler *workflowTaskCompletedHandler) handleCommands(
 		return nil, err
 	}
 	mutations = append(mutations, eagerActivityMutations...)
+
+	optimisticActivityMutation, err := handler.handOffOptimisticWork()
+	if err != nil {
+		return nil, err
+	}
+	if optimisticActivityMutation != nil {
+		mutations = append(mutations, optimisticActivityMutation)
+	}
 
 	if err := handler.flushWorkerCommandsTasks(); err != nil {
 		return nil, err
@@ -332,6 +359,12 @@ func (handler *workflowTaskCompletedHandler) handleCommand(
 
 	case enumspb.COMMAND_TYPE_PROTOCOL_MESSAGE:
 		return nil, handler.handleCommandProtocolMessage(ctx, command.GetProtocolMessageCommandAttributes(), msgs)
+
+	case enumspb.COMMAND_TYPE_RESOLVE_OPTIMISTIC_ACTIVITY:
+		historyEvent, err = handler.handleCommandResolveOptimisticActivity(ctx, command.GetResolveOptimisticActivityCommandAttributes())
+
+	case enumspb.COMMAND_TYPE_FIRE_OPTIMISTIC_TIMER:
+		historyEvent, err = handler.handleCommandFireOptimisticTimer(ctx, command.GetFireOptimisticTimerCommandAttributes())
 
 	default:
 		// TODO: need to handle migration between HSM and CHASM
@@ -499,6 +532,30 @@ func (handler *workflowTaskCompletedHandler) handleCommandScheduleActivity(
 		return nil, nil, err
 	}
 
+	optimisticStart := attr.GetOptimisticStart()
+	var optimisticStartTime time.Time
+	if optimisticStart != nil {
+		if err := handler.checkOptimisticStartEnabled(); err != nil || handler.stopProcessing {
+			return nil, nil, err
+		}
+		if attr.GetTaskQueue().GetName() != executionInfo.TaskQueue {
+			return nil, nil, handler.failWorkflowTask(
+				enumspb.WORKFLOW_TASK_FAILED_CAUSE_BAD_SCHEDULE_ACTIVITY_ATTRIBUTES,
+				serviceerror.NewInvalidArgumentf(
+					"An optimistically started activity must use the workflow's task queue. ActivityId=%s TaskQueue=%s WorkflowTaskQueue=%s",
+					attr.GetActivityId(), attr.GetTaskQueue().GetName(), executionInfo.TaskQueue),
+			)
+		}
+		workflowTime, err := handler.optimisticWorkflowTime(optimisticStart.GetStartOffset())
+		if err != nil {
+			return nil, nil, handler.failWorkflowTask(
+				enumspb.WORKFLOW_TASK_FAILED_CAUSE_BAD_SCHEDULE_ACTIVITY_ATTRIBUTES,
+				serviceerror.NewInvalidArgumentf("Invalid OptimisticStart.StartOffset on ScheduleActivityTaskCommand: %v. ActivityId=%s", err, attr.GetActivityId()),
+			)
+		}
+		optimisticStartTime = handler.backdatedTime(workflowTime)
+	}
+
 	if handler.mutableState.GetAssignedBuildId() == "" {
 		// TODO: this is supported in new versioning [cleanup-old-wv]
 		if attr.UseWorkflowBuildId && attr.TaskQueue.GetName() != "" && attr.TaskQueue.Name != handler.mutableState.GetExecutionInfo().TaskQueue {
@@ -513,6 +570,13 @@ func (handler *workflowTaskCompletedHandler) handleCommandScheduleActivity(
 		metrics.CommandTypeTag(enumspb.COMMAND_TYPE_SCHEDULE_ACTIVITY_TASK.String()),
 		attr.GetInput().Size(),
 		"ScheduleActivityTaskCommandAttributes.Input exceeds size limit.",
+	); err != nil {
+		return nil, nil, handler.terminateWorkflow(enumspb.WORKFLOW_TASK_FAILED_CAUSE_BAD_SCHEDULE_ACTIVITY_ATTRIBUTES, err)
+	}
+	if err := handler.sizeLimitChecker.checkIfPayloadSizeExceedsLimit(
+		metrics.CommandTypeTag(enumspb.COMMAND_TYPE_SCHEDULE_ACTIVITY_TASK.String()),
+		optimisticStart.GetHeartbeatDetails().Size(),
+		"ScheduleActivityTaskCommandAttributes.OptimisticStart.HeartbeatDetails exceeds size limit.",
 	); err != nil {
 		return nil, nil, handler.terminateWorkflow(enumspb.WORKFLOW_TASK_FAILED_CAUSE_BAD_SCHEDULE_ACTIVITY_ATTRIBUTES, err)
 	}
@@ -547,14 +611,26 @@ func (handler *workflowTaskCompletedHandler) handleCommandScheduleActivity(
 		bypassActivityTaskGeneration = true
 		eagerStartActivity = false
 	}
+	// An optimistically started activity is already running on the worker that completed this workflow task.
+	if optimisticStart != nil {
+		bypassActivityTaskGeneration = true
+		eagerStartActivity = false
+	}
 
-	event, _, err := handler.mutableState.AddActivityTaskScheduledEvent(
+	event, ai, err := handler.mutableState.AddActivityTaskScheduledEvent(
 		handler.workflowTaskCompletedID,
 		attr,
 		bypassActivityTaskGeneration,
 	)
 	if err != nil {
 		return nil, nil, handler.failWorkflowTaskOnInvalidArgument(enumspb.WORKFLOW_TASK_FAILED_CAUSE_SCHEDULE_ACTIVITY_DUPLICATE_ID, err)
+	}
+
+	if optimisticStart != nil {
+		if err := handler.startOptimisticActivity(attr, ai, optimisticStartTime); err != nil {
+			return nil, nil, err
+		}
+		return event, &handleCommandResponse{}, nil
 	}
 
 	if !eagerStartActivity {
@@ -691,17 +767,46 @@ func (handler *workflowTaskCompletedHandler) handlePostCommandEagerExecuteActivi
 	attr *commandpb.ScheduleActivityTaskCommandAttributes,
 	ai *persistencespb.ActivityInfo,
 ) (workflowTaskResponseMutation, error) {
-	var stamp *commonpb.WorkerVersionStamp
-	// eager activity always uses workflow's build ID
-	buildId := handler.mutableState.GetAssignedBuildId()
-	stamp = &commonpb.WorkerVersionStamp{UseVersioning: buildId != "", BuildId: buildId}
-
-	shardClock, err := handler.shard.NewVectorClock()
+	if err := handler.startActivityOnCompletingWorker(ai); err != nil {
+		return nil, err
+	}
+	activityTask, err := handler.newStartedActivityTask(attr, ai)
 	if err != nil {
 		return nil, err
 	}
+	metrics.ActivityEagerExecutionCounter.With(
+		metrics.GetPerActivityEagerExecutionScope(
+			handler.metricsHandler,
+			handler.mutableState.GetNamespaceEntry().Name().String(),
+			ai.TaskQueue,
+			handler.config.BreakdownMetricsByTaskQueue(
+				handler.mutableState.GetNamespaceEntry().Name().String(),
+				ai.TaskQueue,
+				enumspb.TASK_QUEUE_TYPE_WORKFLOW,
+			),
+			metrics.HistoryRespondWorkflowTaskCompletedScope,
+		),
+	).Record(1)
 
-	if _, err := handler.mutableState.AddActivityTaskStartedEvent(
+	return func(resp *historyservice.RespondWorkflowTaskCompletedResponse) error {
+		resp.ActivityTasks = append(resp.ActivityTasks, activityTask)
+		return nil
+	}, nil
+}
+
+// startActivityOnCompletingWorker records the start of an activity that runs on the worker that
+// completed this workflow task, as eager and optimistically started activities do.
+func (handler *workflowTaskCompletedHandler) startActivityOnCompletingWorker(ai *persistencespb.ActivityInfo) error {
+	// The activity always uses the workflow's build ID.
+	buildId := handler.mutableState.GetAssignedBuildId()
+	stamp := &commonpb.WorkerVersionStamp{UseVersioning: buildId != "", BuildId: buildId}
+
+	shardClock, err := handler.shard.NewVectorClock()
+	if err != nil {
+		return err
+	}
+
+	_, err = handler.mutableState.AddActivityTaskStartedEvent(
 		ai,
 		ai.GetScheduledEventId(),
 		uuid.NewString(),
@@ -709,12 +814,18 @@ func (handler *workflowTaskCompletedHandler) handlePostCommandEagerExecuteActivi
 		stamp,
 		handler.workflowTaskDeployment,
 		nil,
-		handler.workerControlTaskQueue, // Eager: activity runs on the same worker that completed the WFT.
+		handler.workerControlTaskQueue,
 		shardClock,
-	); err != nil {
-		return nil, err
-	}
+	)
+	return err
+}
 
+// newStartedActivityTask builds the activity task, including its task token, for an activity started
+// by startActivityOnCompletingWorker.
+func (handler *workflowTaskCompletedHandler) newStartedActivityTask(
+	attr *commandpb.ScheduleActivityTaskCommandAttributes,
+	ai *persistencespb.ActivityInfo,
+) (*workflowservice.PollActivityTaskQueueResponse, error) {
 	executionInfo := handler.mutableState.GetExecutionInfo()
 	namespaceID := namespace.ID(executionInfo.NamespaceId)
 	runID := handler.mutableState.GetExecutionState().RunId
@@ -727,7 +838,7 @@ func (handler *workflowTaskCompletedHandler) handlePostCommandEagerExecuteActivi
 		attr.ActivityId,
 		attr.ActivityType.GetName(),
 		ai.Attempt,
-		shardClock,
+		ai.StartedClock,
 		ai.Version,
 		ai.StartVersion,
 		nil,
@@ -738,7 +849,7 @@ func (handler *workflowTaskCompletedHandler) handlePostCommandEagerExecuteActivi
 		return nil, err
 	}
 
-	activityTask := &workflowservice.PollActivityTaskQueueResponse{
+	return &workflowservice.PollActivityTaskQueueResponse{
 		ActivityId:   attr.ActivityId,
 		ActivityType: attr.ActivityType,
 		Header:       attr.Header,
@@ -766,24 +877,6 @@ func (handler *workflowTaskCompletedHandler) handlePostCommandEagerExecuteActivi
 			MaximumAttempts:        ai.RetryMaximumAttempts,
 			NonRetryableErrorTypes: ai.RetryNonRetryableErrorTypes,
 		},
-	}
-	metrics.ActivityEagerExecutionCounter.With(
-		metrics.GetPerActivityEagerExecutionScope(
-			handler.metricsHandler,
-			handler.mutableState.GetNamespaceEntry().Name().String(),
-			ai.TaskQueue,
-			handler.config.BreakdownMetricsByTaskQueue(
-				handler.mutableState.GetNamespaceEntry().Name().String(),
-				ai.TaskQueue,
-				enumspb.TASK_QUEUE_TYPE_WORKFLOW,
-			),
-			metrics.HistoryRespondWorkflowTaskCompletedScope,
-		),
-	).Record(1)
-
-	return func(resp *historyservice.RespondWorkflowTaskCompletedResponse) error {
-		resp.ActivityTasks = append(resp.ActivityTasks, activityTask)
-		return nil
 	}, nil
 }
 
@@ -825,6 +918,9 @@ func (handler *workflowTaskCompletedHandler) handleCommandRequestCancelActivity(
 				return nil, err
 			}
 			handler.activityNotStartedCancelled = true
+		} else if handler.isOptimisticActivity(ai.ScheduledEventId) {
+			// The worker that started the activity optimistically sent this cancel request, so it
+			// already knows about it.
 		} else if ai.WorkerControlTaskQueue != "" {
 			if ai.StartedClock == nil {
 				// StartedClock is nil when the activity is not currently running on a worker
@@ -900,11 +996,268 @@ func (handler *workflowTaskCompletedHandler) handleCommandStartTimer(
 		return nil, err
 	}
 
-	event, _, err := handler.mutableState.AddTimerStartedEvent(handler.workflowTaskCompletedID, attr)
+	optimisticStart := attr.GetOptimisticStart()
+	var optimisticStartTime time.Time
+	if optimisticStart != nil {
+		if err := handler.checkOptimisticStartEnabled(); err != nil || handler.stopProcessing {
+			return nil, err
+		}
+		if optimisticStart.GetHeartbeatDetails() != nil {
+			return nil, handler.failWorkflowTask(
+				enumspb.WORKFLOW_TASK_FAILED_CAUSE_BAD_START_TIMER_ATTRIBUTES,
+				serviceerror.NewInvalidArgumentf("OptimisticStart.HeartbeatDetails is set on StartTimerCommand. TimerId=%s", attr.GetTimerId()),
+			)
+		}
+		workflowTime, err := handler.optimisticWorkflowTime(optimisticStart.GetStartOffset())
+		if err != nil {
+			return nil, handler.failWorkflowTask(
+				enumspb.WORKFLOW_TASK_FAILED_CAUSE_BAD_START_TIMER_ATTRIBUTES,
+				serviceerror.NewInvalidArgumentf("Invalid OptimisticStart.StartOffset on StartTimerCommand: %v. TimerId=%s", err, attr.GetTimerId()),
+			)
+		}
+		optimisticStartTime = handler.backdatedTime(workflowTime)
+	}
+
+	event, ti, err := handler.mutableState.AddTimerStartedEvent(handler.workflowTaskCompletedID, attr)
 	if err != nil {
 		return nil, handler.failWorkflowTaskOnInvalidArgument(enumspb.WORKFLOW_TASK_FAILED_CAUSE_START_TIMER_DUPLICATE_ID, err)
 	}
+
+	if optimisticStart != nil {
+		// The user timer task is generated when the transaction closes, so it uses the backdated expiry.
+		ti.ExpiryTime = timestamppb.New(optimisticStartTime.Add(attr.GetStartToFireTimeout().AsDuration()))
+		if err := handler.mutableState.UpdateUserTimer(ti); err != nil {
+			return nil, err
+		}
+		handler.optimisticTimers[attr.GetTimerId()] = event.GetEventId()
+		metrics.OptimisticTimerStarted.With(handler.metricsHandler).Record(1)
+	}
 	return event, nil
+}
+
+// checkOptimisticStartEnabled fails the workflow task if optimistic start is disabled for the namespace.
+func (handler *workflowTaskCompletedHandler) checkOptimisticStartEnabled() error {
+	if handler.config.EnableOptimisticStart(handler.mutableState.GetNamespaceEntry().Name().String()) {
+		return nil
+	}
+	return handler.failWorkflowTask(
+		enumspb.WORKFLOW_TASK_FAILED_CAUSE_FEATURE_DISABLED,
+		serviceerror.NewInvalidArgument("Optimistic start is disabled for this namespace."),
+	)
+}
+
+// optimisticWorkflowTime validates an offset reported for an optimistic command and returns the
+// workflow time it corresponds to: the workflow task's started time plus the offset. Offsets must
+// be non-negative and non-decreasing in command order.
+func (handler *workflowTaskCompletedHandler) optimisticWorkflowTime(offset *durationpb.Duration) (time.Time, error) {
+	if err := timestamp.ValidateAndCapProtoDuration(offset); err != nil {
+		return time.Time{}, err
+	}
+	if offset.AsDuration() < handler.lastOptimisticOffset {
+		return time.Time{}, fmt.Errorf("offset %v is smaller than the offset %v of an earlier command", offset.AsDuration(), handler.lastOptimisticOffset)
+	}
+	handler.lastOptimisticOffset = offset.AsDuration()
+	return handler.workflowTaskStartedTime.Add(offset.AsDuration()), nil
+}
+
+// backdatedTime returns the time to use as the start of an optimistic command for deadline
+// computation. It is never later than now.
+func (handler *workflowTaskCompletedHandler) backdatedTime(workflowTime time.Time) time.Time {
+	if now := handler.mutableState.Now(); workflowTime.After(now) {
+		return now
+	}
+	return workflowTime
+}
+
+// startOptimisticActivity records the start of an activity the worker started optimistically, with
+// scheduled and started times backdated to when the worker started it.
+func (handler *workflowTaskCompletedHandler) startOptimisticActivity(
+	attr *commandpb.ScheduleActivityTaskCommandAttributes,
+	ai *persistencespb.ActivityInfo,
+	startTime time.Time,
+) error {
+	if err := handler.startActivityOnCompletingWorker(ai); err != nil {
+		return err
+	}
+	if err := handler.mutableState.UpdateActivity(ai.GetScheduledEventId(), func(ai *persistencespb.ActivityInfo, _ historyi.MutableState) error {
+		ai.ScheduledTime = timestamppb.New(startTime)
+		ai.FirstScheduledTime = timestamppb.New(startTime)
+		ai.StartedTime = timestamppb.New(startTime)
+		if ai.RetryExpirationTime != nil {
+			ai.RetryExpirationTime = timestamppb.New(startTime.Add(ai.GetScheduleToCloseTimeout().AsDuration()))
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	handler.optimisticActivities = append(handler.optimisticActivities, optimisticActivity{
+		scheduledEventID: ai.GetScheduledEventId(),
+		attr:             attr,
+	})
+	metrics.OptimisticActivityStarted.With(handler.metricsHandler).Record(1)
+	return nil
+}
+
+func (handler *workflowTaskCompletedHandler) isOptimisticActivity(scheduledEventID int64) bool {
+	return slices.ContainsFunc(handler.optimisticActivities, func(activity optimisticActivity) bool {
+		return activity.scheduledEventID == scheduledEventID
+	})
+}
+
+func (handler *workflowTaskCompletedHandler) handleCommandResolveOptimisticActivity(
+	_ context.Context,
+	attr *commandpb.ResolveOptimisticActivityCommandAttributes,
+) (*historypb.HistoryEvent, error) {
+	const failedCause = enumspb.WORKFLOW_TASK_FAILED_CAUSE_BAD_RESOLVE_OPTIMISTIC_ACTIVITY_ATTRIBUTES
+
+	if err := handler.checkOptimisticStartEnabled(); err != nil || handler.stopProcessing {
+		return nil, err
+	}
+	if attr == nil {
+		return nil, handler.failWorkflowTask(failedCause, serviceerror.NewInvalidArgument(
+			"ResolveOptimisticActivityCommandAttributes is not set on ResolveOptimisticActivityCommand."))
+	}
+
+	scheduledEventID := attr.GetScheduledEventId()
+	if !handler.isOptimisticActivity(scheduledEventID) {
+		return nil, handler.failWorkflowTask(failedCause, serviceerror.NewInvalidArgumentf(
+			"ScheduledEventId on ResolveOptimisticActivityCommand doesn't reference an activity started optimistically earlier in this workflow task. ScheduledEventId=%d",
+			scheduledEventID))
+	}
+	ai, ok := handler.mutableState.GetActivityInfo(scheduledEventID)
+	if !ok {
+		return nil, handler.failWorkflowTask(failedCause, serviceerror.NewInvalidArgumentf(
+			"ResolveOptimisticActivityCommand references an activity that is already resolved. ScheduledEventId=%d",
+			scheduledEventID))
+	}
+
+	workflowTime, err := handler.optimisticWorkflowTime(attr.GetResolveOffset())
+	if err != nil {
+		return nil, handler.failWorkflowTask(failedCause, serviceerror.NewInvalidArgumentf(
+			"Invalid ResolveOffset on ResolveOptimisticActivityCommand: %v. ScheduledEventId=%d", err, scheduledEventID))
+	}
+
+	var event *historypb.HistoryEvent
+	switch outcome := attr.GetOutcome().(type) {
+	case *commandpb.ResolveOptimisticActivityCommandAttributes_Completed_:
+		if err := handler.sizeLimitChecker.checkIfPayloadSizeExceedsLimit(
+			metrics.CommandTypeTag(enumspb.COMMAND_TYPE_RESOLVE_OPTIMISTIC_ACTIVITY.String()),
+			outcome.Completed.GetResult().Size(),
+			"ResolveOptimisticActivityCommandAttributes.Completed.Result exceeds size limit.",
+		); err != nil {
+			return nil, handler.terminateWorkflow(failedCause, err)
+		}
+		event, err = handler.mutableState.AddOptimisticActivityTaskCompletedEvent(
+			scheduledEventID, handler.identity, outcome.Completed.GetResult(), workflowTime)
+	case *commandpb.ResolveOptimisticActivityCommandAttributes_Canceled_:
+		if !ai.GetCancelRequested() {
+			return nil, handler.failWorkflowTask(failedCause, serviceerror.NewInvalidArgumentf(
+				"ResolveOptimisticActivityCommand cancels an activity without an earlier RequestCancelActivityTaskCommand. ScheduledEventId=%d",
+				scheduledEventID))
+		}
+		if err := handler.sizeLimitChecker.checkIfPayloadSizeExceedsLimit(
+			metrics.CommandTypeTag(enumspb.COMMAND_TYPE_RESOLVE_OPTIMISTIC_ACTIVITY.String()),
+			outcome.Canceled.GetDetails().Size(),
+			"ResolveOptimisticActivityCommandAttributes.Canceled.Details exceeds size limit.",
+		); err != nil {
+			return nil, handler.terminateWorkflow(failedCause, err)
+		}
+		event, err = handler.mutableState.AddOptimisticActivityTaskCanceledEvent(
+			scheduledEventID, handler.identity, outcome.Canceled.GetDetails(), workflowTime)
+	default:
+		return nil, handler.failWorkflowTask(failedCause, serviceerror.NewInvalidArgumentf(
+			"Outcome is not set on ResolveOptimisticActivityCommand. ScheduledEventId=%d", scheduledEventID))
+	}
+	if err != nil {
+		return nil, handler.failWorkflowTaskOnInvalidArgument(failedCause, err)
+	}
+	metrics.OptimisticActivityResolved.With(handler.metricsHandler).Record(1)
+	return event, nil
+}
+
+func (handler *workflowTaskCompletedHandler) handleCommandFireOptimisticTimer(
+	_ context.Context,
+	attr *commandpb.FireOptimisticTimerCommandAttributes,
+) (*historypb.HistoryEvent, error) {
+	const failedCause = enumspb.WORKFLOW_TASK_FAILED_CAUSE_BAD_FIRE_OPTIMISTIC_TIMER_ATTRIBUTES
+
+	if err := handler.checkOptimisticStartEnabled(); err != nil || handler.stopProcessing {
+		return nil, err
+	}
+	if attr == nil {
+		return nil, handler.failWorkflowTask(failedCause, serviceerror.NewInvalidArgument(
+			"FireOptimisticTimerCommandAttributes is not set on FireOptimisticTimerCommand."))
+	}
+
+	timerID := attr.GetTimerId()
+	startedEventID, ok := handler.optimisticTimers[timerID]
+	if !ok {
+		return nil, handler.failWorkflowTask(failedCause, serviceerror.NewInvalidArgumentf(
+			"TimerId on FireOptimisticTimerCommand doesn't reference a timer started optimistically earlier in this workflow task. TimerId=%s",
+			timerID))
+	}
+	if ti, ok := handler.mutableState.GetUserTimerInfo(timerID); !ok || ti.GetStartedEventId() != startedEventID {
+		return nil, handler.failWorkflowTask(failedCause, serviceerror.NewInvalidArgumentf(
+			"FireOptimisticTimerCommand references a timer that already fired or was canceled. TimerId=%s",
+			timerID))
+	}
+
+	workflowTime, err := handler.optimisticWorkflowTime(attr.GetFireOffset())
+	if err != nil {
+		return nil, handler.failWorkflowTask(failedCause, serviceerror.NewInvalidArgumentf(
+			"Invalid FireOffset on FireOptimisticTimerCommand: %v. TimerId=%s", err, timerID))
+	}
+
+	event, err := handler.mutableState.AddOptimisticTimerFiredEvent(timerID, workflowTime)
+	if err != nil {
+		return nil, handler.failWorkflowTaskOnInvalidArgument(failedCause, err)
+	}
+	metrics.OptimisticTimerFired.With(handler.metricsHandler).Record(1)
+	return event, nil
+}
+
+// handOffOptimisticWork transfers optimistic activities and timers that are still pending after
+// all commands are handled to the server. It returns the task tokens of the activities, which keep
+// running on the worker.
+func (handler *workflowTaskCompletedHandler) handOffOptimisticWork() (workflowTaskResponseMutation, error) {
+	if !handler.mutableState.IsWorkflowExecutionRunning() {
+		return nil, nil
+	}
+
+	for timerID, startedEventID := range handler.optimisticTimers {
+		if ti, ok := handler.mutableState.GetUserTimerInfo(timerID); ok && ti.GetStartedEventId() == startedEventID {
+			metrics.OptimisticTimerHandedOff.With(handler.metricsHandler).Record(1)
+		}
+	}
+
+	var activityTasks []*workflowservice.PollActivityTaskQueueResponse
+	for _, activity := range handler.optimisticActivities {
+		ai, ok := handler.mutableState.GetActivityInfo(activity.scheduledEventID)
+		if !ok {
+			continue
+		}
+		// The heartbeat timeout counts from the handoff.
+		if err := handler.mutableState.UpdateActivity(ai.GetScheduledEventId(), func(ai *persistencespb.ActivityInfo, ms historyi.MutableState) error {
+			ai.LastHeartbeatUpdateTime = timestamppb.New(ms.Now())
+			ai.LastHeartbeatDetails = activity.attr.GetOptimisticStart().GetHeartbeatDetails()
+			return nil
+		}); err != nil {
+			return nil, err
+		}
+		activityTask, err := handler.newStartedActivityTask(activity.attr, ai)
+		if err != nil {
+			return nil, err
+		}
+		activityTasks = append(activityTasks, activityTask)
+		metrics.OptimisticActivityHandedOff.With(handler.metricsHandler).Record(1)
+	}
+	if len(activityTasks) == 0 {
+		return nil, nil
+	}
+	return func(resp *historyservice.RespondWorkflowTaskCompletedResponse) error {
+		resp.OptimisticActivityTasks = append(resp.OptimisticActivityTasks, activityTasks...)
+		return nil
+	}, nil
 }
 
 func (handler *workflowTaskCompletedHandler) handleCommandCompleteWorkflow(

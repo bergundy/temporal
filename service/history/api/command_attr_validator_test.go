@@ -44,6 +44,8 @@ var (
 		{CommandType: enumspb.COMMAND_TYPE_START_CHILD_WORKFLOW_EXECUTION},
 		{CommandType: enumspb.COMMAND_TYPE_UPSERT_WORKFLOW_SEARCH_ATTRIBUTES},
 		{CommandType: enumspb.COMMAND_TYPE_MODIFY_WORKFLOW_PROPERTIES},
+		{CommandType: enumspb.COMMAND_TYPE_RESOLVE_OPTIMISTIC_ACTIVITY},
+		{CommandType: enumspb.COMMAND_TYPE_FIRE_OPTIMISTIC_TIMER},
 	}
 
 	terminalCommands = []*commandpb.Command{

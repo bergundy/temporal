@@ -118,10 +118,11 @@ func TestCommandProtocolMessage(t *testing.T) {
 			nsregistry.DefaultNamespaceStateChanged,
 		)
 		out.handler = newWorkflowTaskCompletedHandler(
-			t.Name(), // identity
-			"",       // workerControlTaskQueue
-			123,      // workflowTaskCompletedID
-			nil,      // workflowTaskDeployment
+			t.Name(),    // identity
+			"",          // workerControlTaskQueue
+			123,         // workflowTaskCompletedID
+			time.Time{}, // workflowTaskStartedTime
+			nil,         // workflowTaskDeployment
 			out.ms,
 			out.updates,
 			&effects,
