@@ -1,6 +1,7 @@
 package activity
 
 import (
+	"github.com/nexus-rpc/sdk-go/nexus"
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/server/chasm"
 	"go.temporal.io/server/chasm/lib/activity/gen/activitypb/v1"
@@ -72,6 +73,15 @@ func (l *componentOnlyLibrary) Components() []*chasm.RegistrableComponent {
 	}
 }
 
+// NexusServiceProcessors returns the processors of the system Nexus operations implemented by the library. The frontend
+// needs them to route direct calls, so they're registered by the component-only library too.
+func (l *componentOnlyLibrary) NexusServiceProcessors() []*chasm.NexusServiceProcessor {
+	if l.config == nil {
+		return nil
+	}
+	return []*chasm.NexusServiceProcessor{newWorkflowServiceNexusServiceProcessor(l.config)}
+}
+
 // NewNilLibrary creates a Library with all nil handlers. Useful for
 // registration-only contexts like tdbg where no task execution is needed.
 func NewNilLibrary() chasm.Library {
@@ -112,6 +122,13 @@ func newLibrary(
 		startToCloseTimeoutTaskHandler:    startToCloseTimeoutTaskHandler,
 		heartbeatTimeoutTaskHandler:       heartbeatTimeoutTaskHandler,
 	}
+}
+
+func (l *library) NexusServices() []*nexus.Service {
+	if l.handler == nil {
+		return nil
+	}
+	return []*nexus.Service{newWorkflowServiceNexusService(l.handler)}
 }
 
 func (l *library) RegisterServices(server *grpc.Server) {
