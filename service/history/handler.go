@@ -26,6 +26,7 @@ import (
 	tokenspb "go.temporal.io/server/api/token/v1"
 	"go.temporal.io/server/chasm"
 	"go.temporal.io/server/chasm/lib/activity"
+	"go.temporal.io/server/chasm/lib/callback"
 	"go.temporal.io/server/client/history"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/archiver"
@@ -51,6 +52,7 @@ import (
 	sdkconverter "go.temporal.io/server/common/sdk"
 	"go.temporal.io/server/common/searchattribute"
 	serviceerrors "go.temporal.io/server/common/serviceerror"
+	"go.temporal.io/server/common/softassert"
 	"go.temporal.io/server/common/tasktoken"
 	"go.temporal.io/server/common/testing/testhooks"
 	"go.temporal.io/server/service/history/api"
@@ -106,6 +108,7 @@ type (
 		chasmEngine                  chasm.Engine
 		chasmRegistry                *chasm.Registry
 		nexusHandler                 nexus.Handler
+		callbackConfig               *callback.Config
 		testHooks                    testhooks.TestHooks
 
 		replicationTaskFetcherFactory    replication.TaskFetcherFactory
@@ -144,6 +147,7 @@ type (
 		DLQMetricsEmitter            *persistence.DLQMetricsEmitter
 		ChasmEngine                  chasm.Engine
 		ChasmRegistry                *chasm.Registry
+		CallbackConfig               *callback.Config
 		TestHooks                    testhooks.TestHooks
 
 		ReplicationTaskFetcherFactory   replication.TaskFetcherFactory
@@ -2559,6 +2563,66 @@ func (h *Handler) StartNexusOperation(
 	ctx context.Context,
 	req *historyservice.StartNexusOperationRequest,
 ) (*historyservice.StartNexusOperationResponse, error) {
+	if h.nexusHandler == nil {
+		return nil, serviceerror.NewUnimplemented("no nexus services registered")
+	}
+	if req.GetRequest().GetCallback() == commonnexus.EphemeralCallbackURL {
+		return h.startNexusOperationWithEphemeralCallback(ctx, req)
+	}
+	return h.startNexusOperation(ctx, req)
+}
+
+// startNexusOperationWithEphemeralCallback holds a start request that carries an ephemeral callback open as a long
+// poll. The operation attaches the callback to the execution it waits on, as it would attach any callback. The callback
+// is scheduled when that execution completes, at which point the operation is started again to get its outcome
+// synchronously. If the long-poll deadline is reached first, the operation's async start is returned.
+func (h *Handler) startNexusOperationWithEphemeralCallback(
+	ctx context.Context,
+	req *historyservice.StartNexusOperationRequest,
+) (*historyservice.StartNexusOperationResponse, error) {
+	nsEntry, err := h.namespaceRegistry.GetNamespaceByID(namespace.ID(req.GetNamespaceId()))
+	if err != nil {
+		return nil, err
+	}
+	options := h.callbackConfig.EphemeralOptions(nsEntry.Name().String())
+	ctx, cancel := contextutil.WithDeadlineBuffer(ctx, options.LongPollTimeout, options.LongPollBuffer)
+	defer cancel()
+
+	var pending *historyservice.StartNexusOperationResponse
+	for {
+		attemptCtx, registrar := callback.WithEphemeralRegistrar(ctx, options)
+		resp, err := h.startNexusOperation(attemptCtx, req)
+		if err != nil {
+			if pending != nil && ctx.Err() != nil {
+				return pending, nil
+			}
+			return nil, err
+		}
+		if resp.GetResponse().GetAsyncSuccess() == nil {
+			return resp, nil
+		}
+		if !registrar.Registered() {
+			return nil, softassert.UnexpectedInternalErr(
+				h.logger,
+				"system Nexus operation started asynchronously without attaching the ephemeral callback",
+				fmt.Errorf("%s/%s", req.GetRequest().GetService(), req.GetRequest().GetOperation()),
+			)
+		}
+		pending = resp
+		completed, err := registrar.Await(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if !completed {
+			return pending, nil
+		}
+	}
+}
+
+func (h *Handler) startNexusOperation(
+	ctx context.Context,
+	req *historyservice.StartNexusOperationRequest,
+) (*historyservice.StartNexusOperationResponse, error) {
 	requestID := req.GetRequest().GetRequestId()
 	// Build nexus.StartOperationOptions from the request
 	options := nexus.StartOperationOptions{
@@ -2581,9 +2645,6 @@ func (h *Handler) StartNexusOperation(
 	})
 
 	// Invoke the operation via the handler
-	if h.nexusHandler == nil {
-		return nil, serviceerror.NewUnimplemented("no nexus services registered")
-	}
 	result, err := h.nexusHandler.StartOperation(ctx, req.GetRequest().GetService(), req.GetRequest().GetOperation(), input, options)
 	if err != nil {
 		if opErr, ok := errors.AsType[*nexus.OperationError](err); ok {
