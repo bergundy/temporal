@@ -1219,15 +1219,15 @@ func (handler *workflowTaskCompletedHandler) handleCommandFireOptimisticTimer(
 
 // handOffOptimisticWork transfers optimistic activities and timers that are still pending after
 // all commands are handled to the server. It returns the task tokens of the activities, which keep
-// running on the worker.
+// running on the worker. Tokens are returned even if a command closed the workflow, so the worker
+// can match the cancel commands sent on close to the activities it runs.
 func (handler *workflowTaskCompletedHandler) handOffOptimisticWork() (workflowTaskResponseMutation, error) {
-	if !handler.mutableState.IsWorkflowExecutionRunning() {
-		return nil, nil
-	}
-
-	for timerID, startedEventID := range handler.optimisticTimers {
-		if ti, ok := handler.mutableState.GetUserTimerInfo(timerID); ok && ti.GetStartedEventId() == startedEventID {
-			metrics.OptimisticTimerHandedOff.With(handler.metricsHandler).Record(1)
+	running := handler.mutableState.IsWorkflowExecutionRunning()
+	if running {
+		for timerID, startedEventID := range handler.optimisticTimers {
+			if ti, ok := handler.mutableState.GetUserTimerInfo(timerID); ok && ti.GetStartedEventId() == startedEventID {
+				metrics.OptimisticTimerHandedOff.With(handler.metricsHandler).Record(1)
+			}
 		}
 	}
 
@@ -1237,13 +1237,15 @@ func (handler *workflowTaskCompletedHandler) handOffOptimisticWork() (workflowTa
 		if !ok {
 			continue
 		}
-		// The heartbeat timeout counts from the handoff.
-		if err := handler.mutableState.UpdateActivity(ai.GetScheduledEventId(), func(ai *persistencespb.ActivityInfo, ms historyi.MutableState) error {
-			ai.LastHeartbeatUpdateTime = timestamppb.New(ms.Now())
-			ai.LastHeartbeatDetails = activity.attr.GetOptimisticStart().GetHeartbeatDetails()
-			return nil
-		}); err != nil {
-			return nil, err
+		if running {
+			// The heartbeat timeout counts from the handoff.
+			if err := handler.mutableState.UpdateActivity(ai.GetScheduledEventId(), func(ai *persistencespb.ActivityInfo, ms historyi.MutableState) error {
+				ai.LastHeartbeatUpdateTime = timestamppb.New(ms.Now())
+				ai.LastHeartbeatDetails = activity.attr.GetOptimisticStart().GetHeartbeatDetails()
+				return nil
+			}); err != nil {
+				return nil, err
+			}
 		}
 		activityTask, err := handler.newStartedActivityTask(activity.attr, ai)
 		if err != nil {

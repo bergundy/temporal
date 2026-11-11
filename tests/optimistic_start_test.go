@@ -733,20 +733,41 @@ func completeOptimisticWorkflowTask(
 	commands ...*commandpb.Command,
 ) (*workflowservice.RespondWorkflowTaskCompletedResponse, time.Time, error) {
 	t.Helper()
+	return completeOptimisticWorkflowTaskWithRequest(t, env, tv, beforeCheckpoint,
+		&workflowservice.RespondWorkflowTaskCompletedRequest{Commands: commands})
+}
+
+// completeOptimisticWorkflowTaskWithRequest is like completeOptimisticWorkflowTask, but completes
+// the task with request.
+func completeOptimisticWorkflowTaskWithRequest(
+	t *testing.T,
+	env *testcore.TestEnv,
+	tv *testvars.TestVars,
+	beforeCheckpoint func(),
+	request *workflowservice.RespondWorkflowTaskCompletedRequest,
+) (*workflowservice.RespondWorkflowTaskCompletedResponse, time.Time, error) {
+	t.Helper()
 	var wftStartedTime time.Time
 	resp, err := env.TaskPoller().PollAndHandleWorkflowTask(tv,
 		func(task *workflowservice.PollWorkflowTaskQueueResponse) (*workflowservice.RespondWorkflowTaskCompletedRequest, error) {
-			events := task.GetHistory().GetEvents()
-			startedEvent := events[len(events)-1]
-			require.Equal(t, enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED, startedEvent.GetEventType())
-			wftStartedTime = startedEvent.GetEventTime().AsTime()
+			wftStartedTime = workflowTaskStartedTime(t, task)
 			if beforeCheckpoint != nil {
 				beforeCheckpoint()
 			}
-			return &workflowservice.RespondWorkflowTaskCompletedRequest{Commands: commands}, nil
+			return request, nil
 		},
 	)
 	return resp, wftStartedTime, err
+}
+
+// workflowTaskStartedTime returns the WorkflowTaskStarted event time of task, which optimistic
+// command offsets are relative to.
+func workflowTaskStartedTime(t *testing.T, task *workflowservice.PollWorkflowTaskQueueResponse) time.Time {
+	t.Helper()
+	events := task.GetHistory().GetEvents()
+	startedEvent := events[len(events)-1]
+	require.Equal(t, enumspb.EVENT_TYPE_WORKFLOW_TASK_STARTED, startedEvent.GetEventType())
+	return startedEvent.GetEventTime().AsTime()
 }
 
 func requireWorkflowTaskFailedWithoutCommandEvents(
