@@ -1,0 +1,24 @@
+# Dynamic config for running the Ruby SDK's tests against a development server with optimistic start
+# enabled. Used by config/development-sqlite-optimistic-start-ruby.yaml.
+#
+# Same as development-optimistic-start.yaml, except that continue-as-new suggestions stay at the
+# server default: the Ruby SDK's test environment doesn't lower them like the Python and .NET ones
+# do, and its tests expect no suggestion for short histories.
+system.enableOptimisticStart:
+  - value: true
+system.forceSearchAttributesCacheRefreshOnRead:
+  - value: true
+system.enableEagerWorkflowStart:
+  - value: true
+frontend.enableExecuteMultiOperation:
+  - value: true
+frontend.workerVersioningWorkflowAPIs:
+  - value: true
+frontend.workerVersioningDataAPIs:
+  - value: true
+system.enableDeploymentVersions:
+  - value: true
+frontend.activityAPIsEnabled:
+  - value: true
+limit.maxIDLength:
+  - value: 255

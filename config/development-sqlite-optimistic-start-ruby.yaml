@@ -1,0 +1,140 @@
+# Same as development-sqlite-optimistic-start.yaml with every port shifted by 30000, so the Ruby SDK's
+# tests can run next to the other SDKs' servers, and with the Ruby dynamic config.
+log:
+  stdout: true
+  level: info
+
+persistence:
+  defaultStore: sqlite-default
+  visibilityStore: sqlite-visibility
+  numHistoryShards: 1
+  datastores:
+    sqlite-default:
+      sql:
+        user: ""
+        password: ""
+        pluginName: "sqlite"
+        databaseName: "default"
+        connectAddr: "localhost"
+        connectProtocol: "tcp"
+        connectAttributes:
+          mode: "memory"
+          cache: "private"
+        maxConns: 1
+        maxIdleConns: 1
+        maxConnLifetime: "1h"
+        tls:
+          enabled: false
+          caFile: ""
+          certFile: ""
+          keyFile: ""
+          enableHostVerification: false
+          serverName: ""
+
+    sqlite-visibility:
+      sql:
+        user: ""
+        password: ""
+        pluginName: "sqlite"
+        databaseName: "default"
+        connectAddr: "localhost"
+        connectProtocol: "tcp"
+        connectAttributes:
+          mode: "memory"
+          cache: "private"
+        maxConns: 1
+        maxIdleConns: 1
+        maxConnLifetime: "1h"
+        tls:
+          enabled: false
+          caFile: ""
+          certFile: ""
+          keyFile: ""
+          enableHostVerification: false
+          serverName: ""
+global:
+  membership:
+    maxJoinDuration: 30s
+    broadcastAddress: "127.0.0.1"
+  pprof:
+    port: 47936
+  metrics:
+    prometheus:
+      # specify framework to use new approach for initializing metrics and/or use opentelemetry
+      # framework: "opentelemetry"
+      framework: "tally"
+      timerType: "histogram"
+      listenAddress: "127.0.0.1:48000"
+
+services:
+  frontend:
+    rpc:
+      grpcPort: 47233
+      membershipPort: 46933
+      bindOnLocalHost: true
+      httpPort: 47243
+
+  matching:
+    rpc:
+      grpcPort: 47235
+      membershipPort: 46935
+      bindOnLocalHost: true
+
+  history:
+    rpc:
+      grpcPort: 47234
+      membershipPort: 46934
+      bindOnLocalHost: true
+
+  worker:
+    rpc:
+      grpcPort: 47239
+      membershipPort: 46939
+      bindOnLocalHost: true
+
+clusterMetadata:
+  enableGlobalNamespace: false
+  failoverVersionIncrement: 10
+  masterClusterName: "active"
+  currentClusterName: "active"
+  clusterInformation:
+    active:
+      enabled: true
+      initialFailoverVersion: 1
+      rpcName: "frontend"
+      rpcAddress: "localhost:47233"
+      httpAddress: "localhost:47243"
+
+dcRedirectionPolicy:
+  policy: "noop"
+
+archival:
+  history:
+    state: "enabled"
+    enableRead: true
+    provider:
+      filestore:
+        fileMode: "0666"
+        dirMode: "0766"
+      gstorage:
+        credentialsPath: "/tmp/gcloud/keyfile.json"
+  visibility:
+    state: "enabled"
+    enableRead: true
+    provider:
+      filestore:
+        fileMode: "0666"
+        dirMode: "0766"
+
+namespaceDefaults:
+  archival:
+    history:
+      state: "disabled"
+      URI: "file:///tmp/temporal_archival/development"
+    visibility:
+      state: "disabled"
+      URI: "file:///tmp/temporal_vis_archival/development"
+
+dynamicConfigClient:
+  filepath: "config/dynamicconfig/development-optimistic-start-ruby.yaml"
+  pollInterval: "5s"
