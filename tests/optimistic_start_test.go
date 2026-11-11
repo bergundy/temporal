@@ -487,6 +487,51 @@ func TestOptimisticStartInvalidCommands(t *testing.T) {
 			cause: enumspb.WORKFLOW_TASK_FAILED_CAUSE_BAD_FIRE_OPTIMISTIC_TIMER_ATTRIBUTES,
 		},
 		{
+			name: "CancelTimerAfterFire",
+			commands: func(tv *testvars.TestVars) []*commandpb.Command {
+				return []*commandpb.Command{
+					optimisticTimerCommand("timer", time.Minute, 0),
+					fireOptimisticTimerCommand("timer", 0),
+					cancelTimerCommand("timer"),
+				}
+			},
+			cause: enumspb.WORKFLOW_TASK_FAILED_CAUSE_BAD_CANCEL_TIMER_ATTRIBUTES,
+		},
+		{
+			name: "ResolveAfterCanceledResolution",
+			commands: func(tv *testvars.TestVars) []*commandpb.Command {
+				return []*commandpb.Command{
+					optimisticActivityCommand(tv, 0),
+					requestCancelActivityCommand(optimisticFirstCommandEventID),
+					resolveOptimisticActivityCanceledCommand(optimisticFirstCommandEventID, 0),
+					resolveOptimisticActivityCompletedCommand(optimisticFirstCommandEventID, 0, nil),
+				}
+			},
+			cause: enumspb.WORKFLOW_TASK_FAILED_CAUSE_BAD_RESOLVE_OPTIMISTIC_ACTIVITY_ATTRIBUTES,
+		},
+		{
+			name: "RequestCancelAfterResolution",
+			commands: func(tv *testvars.TestVars) []*commandpb.Command {
+				return []*commandpb.Command{
+					optimisticActivityCommand(tv, 0),
+					resolveOptimisticActivityCompletedCommand(optimisticFirstCommandEventID, 0, nil),
+					requestCancelActivityCommand(optimisticFirstCommandEventID),
+				}
+			},
+			cause: enumspb.WORKFLOW_TASK_FAILED_CAUSE_BAD_REQUEST_CANCEL_ACTIVITY_ATTRIBUTES,
+		},
+		{
+			name: "RequestCancelTwice",
+			commands: func(tv *testvars.TestVars) []*commandpb.Command {
+				return []*commandpb.Command{
+					optimisticActivityCommand(tv, 0),
+					requestCancelActivityCommand(optimisticFirstCommandEventID),
+					requestCancelActivityCommand(optimisticFirstCommandEventID),
+				}
+			},
+			cause: enumspb.WORKFLOW_TASK_FAILED_CAUSE_BAD_REQUEST_CANCEL_ACTIVITY_ATTRIBUTES,
+		},
+		{
 			name: "FireTwice",
 			commands: func(tv *testvars.TestVars) []*commandpb.Command {
 				return []*commandpb.Command{

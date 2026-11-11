@@ -896,6 +896,17 @@ func (handler *workflowTaskCompletedHandler) handleCommandRequestCancelActivity(
 	}
 
 	scheduledEventID := attr.GetScheduledEventId()
+	if handler.isOptimisticActivity(scheduledEventID) {
+		if _, ok := handler.mutableState.GetActivityInfo(scheduledEventID); !ok {
+			// The workflow already observed the outcome of this activity earlier in the command list.
+			return nil, handler.failWorkflowTask(
+				enumspb.WORKFLOW_TASK_FAILED_CAUSE_BAD_REQUEST_CANCEL_ACTIVITY_ATTRIBUTES,
+				serviceerror.NewInvalidArgumentf(
+					"RequestCancelActivityTaskCommand references an optimistically started activity that is already resolved. ScheduledEventId=%d",
+					scheduledEventID),
+			)
+		}
+	}
 	actCancelReqEvent, ai, err := handler.mutableState.AddActivityTaskCancelRequestedEvent(
 		handler.workflowTaskCompletedID,
 		scheduledEventID,
