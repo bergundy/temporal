@@ -104,8 +104,8 @@ func attachEphemeral(
 	if len(newCallbacks) != 1 {
 		return serviceerror.NewInvalidArgument("an ephemeral callback can't be attached along with other callbacks")
 	}
-	registrar, _ := ctx.Value(ephemeralRegistrarKey{}).(*EphemeralRegistrar)
-	if registrar == nil {
+	registrar, ok := ctx.Value(ephemeralRegistrarKey{}).(*EphemeralRegistrar)
+	if !ok {
 		return serviceerror.NewInvalidArgument("ephemeral callbacks are not supported for this request")
 	}
 	if host.LifecycleState(ctx).IsClosed() {

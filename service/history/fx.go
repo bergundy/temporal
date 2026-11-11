@@ -318,10 +318,10 @@ type systemNexusHandler struct {
 	handlers map[*nexus.Service]nexus.Handler
 }
 
-func (h *systemNexusHandler) handler(service, operation string) (nexus.Handler, error) {
-	svcs, ok := h.services[service]
+func (h *systemNexusHandler) handler(serviceName, operation string) (nexus.Handler, error) {
+	svcs, ok := h.services[serviceName]
 	if !ok {
-		return nil, nexus.NewHandlerErrorf(nexus.HandlerErrorTypeNotFound, "service %q not found", service)
+		return nil, nexus.NewHandlerErrorf(nexus.HandlerErrorTypeNotFound, "service %q not found", serviceName)
 	}
 	for _, svc := range svcs {
 		if svc.Operation(operation) != nil {
@@ -333,27 +333,27 @@ func (h *systemNexusHandler) handler(service, operation string) (nexus.Handler, 
 
 func (h *systemNexusHandler) StartOperation(
 	ctx context.Context,
-	service, operation string,
+	serviceName, operation string,
 	input *nexus.LazyValue,
 	options nexus.StartOperationOptions,
 ) (nexus.HandlerStartOperationResult[any], error) {
-	handler, err := h.handler(service, operation)
+	handler, err := h.handler(serviceName, operation)
 	if err != nil {
 		return nil, err
 	}
-	return handler.StartOperation(ctx, service, operation, input, options)
+	return handler.StartOperation(ctx, serviceName, operation, input, options)
 }
 
 func (h *systemNexusHandler) CancelOperation(
 	ctx context.Context,
-	service, operation, token string,
+	serviceName, operation, token string,
 	options nexus.CancelOperationOptions,
 ) error {
-	handler, err := h.handler(service, operation)
+	handler, err := h.handler(serviceName, operation)
 	if err != nil {
 		return err
 	}
-	return handler.CancelOperation(ctx, service, operation, token, options)
+	return handler.CancelOperation(ctx, serviceName, operation, token, options)
 }
 
 func HistoryEngineFactoryProvider(

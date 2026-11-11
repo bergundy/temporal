@@ -16,6 +16,7 @@ import (
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/health"
 	"go.temporal.io/server/common/log"
+	commonnexus "go.temporal.io/server/common/nexus"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -158,12 +159,16 @@ func specialCaseAPIIsPolling(req any) bool {
 	case *historyservice.GetWorkflowExecutionHistoryRequest:
 		inner := request.GetRequest()
 		return inner != nil && inner.GetWaitNewEvent()
+	case *historyservice.StartNexusOperationRequest:
+		return request.GetRequest().GetCallback() == commonnexus.EphemeralCallbackURL
 
 	// frontend
 	case *workflowservice.GetWorkflowExecutionHistoryRequest:
 		return request.GetWaitNewEvent()
 	case *workflowservice.DescribeActivityExecutionRequest:
 		return len(request.GetLongPollToken()) > 0
+	case *workflowservice.StartNexusOperationRequest:
+		return request.GetCompletionCallback().GetEphemeral() != nil
 	default:
 		return false
 	}

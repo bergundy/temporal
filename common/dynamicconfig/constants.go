@@ -1076,6 +1076,12 @@ of Timeout and if no activity is seen even after that the connection is closed.`
 		true,
 		`FrontendEnableSchedules enables schedule-related RPCs in the frontend`,
 	)
+	FrontendEnableDirectNexusCalls = NewNamespaceBoolSetting(
+		"frontend.enableDirectNexusCalls",
+		false,
+		`FrontendEnableDirectNexusCalls enables the StartNexusOperation and CancelNexusOperation RPCs, which call Nexus
+operations directly, without a durable caller-side operation.`,
+	)
 	// [cleanup-wv-pre-release]
 	EnableDeployments = NewNamespaceBoolSetting(
 		"system.enableDeployments",
