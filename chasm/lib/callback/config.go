@@ -3,6 +3,7 @@ package callback
 import (
 	"time"
 
+	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/backoff"
 	commoncallbacks "go.temporal.io/server/common/callbacks"
 	"go.temporal.io/server/common/dynamicconfig"
@@ -55,10 +56,41 @@ is required for mixed-version compatibility because trusting a caller-controlled
 internally.`,
 )
 
+var EphemeralLongPollTimeout = dynamicconfig.NewNamespaceDurationSetting(
+	"callback.ephemeral.longPollTimeout",
+	common.DefaultLongPollTimeout,
+	`Maximum time a request carrying an ephemeral callback waits for the operation to complete before it returns the
+operation as still running.`,
+)
+
+var EphemeralLongPollBuffer = dynamicconfig.NewNamespaceDurationSetting(
+	"callback.ephemeral.longPollBuffer",
+	common.DefaultLongPollBuffer,
+	`A request carrying an ephemeral callback returns the operation as still running at least this long before the
+caller's deadline.`,
+)
+
+var EphemeralTTL = dynamicconfig.NewNamespaceDurationSetting(
+	"callback.ephemeral.ttl",
+	2*time.Minute,
+	`How long an ephemeral callback stays attached to an execution before it can be pruned. Must exceed
+callback.ephemeral.longPollTimeout.`,
+)
+
+var EphemeralMaxPerExecution = dynamicconfig.NewNamespaceIntSetting(
+	"callback.ephemeral.maxPerExecution",
+	1000,
+	`The maximum number of ephemeral callbacks that can be attached to an execution at once.`,
+)
+
 type Config struct {
-	RequestTimeout      dynamicconfig.DurationPropertyFnWithDestinationFilter
-	RetryPolicy         dynamicconfig.TypedPropertyFn[backoff.RetryPolicy]
-	InspectSourceHeader dynamicconfig.BoolPropertyFn
+	RequestTimeout           dynamicconfig.DurationPropertyFnWithDestinationFilter
+	RetryPolicy              dynamicconfig.TypedPropertyFn[backoff.RetryPolicy]
+	InspectSourceHeader      dynamicconfig.BoolPropertyFn
+	EphemeralLongPollTimeout dynamicconfig.DurationPropertyFnWithNamespaceFilter
+	EphemeralLongPollBuffer  dynamicconfig.DurationPropertyFnWithNamespaceFilter
+	EphemeralTTL             dynamicconfig.DurationPropertyFnWithNamespaceFilter
+	EphemeralMaxPerExecution dynamicconfig.IntPropertyFnWithNamespaceFilter
 }
 
 func configProvider(dc *dynamicconfig.Collection) *Config {
@@ -73,7 +105,11 @@ func configProvider(dc *dynamicconfig.Collection) *Config {
 				backoff.NoInterval,
 			)
 		},
-		InspectSourceHeader: InspectSourceHeader.Get(dc),
+		InspectSourceHeader:      InspectSourceHeader.Get(dc),
+		EphemeralLongPollTimeout: EphemeralLongPollTimeout.Get(dc),
+		EphemeralLongPollBuffer:  EphemeralLongPollBuffer.Get(dc),
+		EphemeralTTL:             EphemeralTTL.Get(dc),
+		EphemeralMaxPerExecution: EphemeralMaxPerExecution.Get(dc),
 	}
 }
 

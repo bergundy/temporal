@@ -137,6 +137,33 @@ func TestValidateCallbacks(t *testing.T) {
 		require.ErrorContains(t, err, "unknown callback variant")
 	})
 
+	t.Run("EphemeralCallbacksFail", func(t *testing.T) {
+		cbs := []*commonpb.Callback{
+			{
+				Variant: &commonpb.Callback_Ephemeral_{
+					Ephemeral: &commonpb.Callback_Ephemeral{},
+				},
+			},
+		}
+
+		err := v.Validate(ctx, "ns", cbs, opts)
+		var unimplementedErr *serviceerror.Unimplemented
+		require.ErrorAs(t, err, &unimplementedErr)
+	})
+
+	t.Run("EphemeralURLFails", func(t *testing.T) {
+		cbs := []*commonpb.Callback{
+			{
+				Variant: &commonpb.Callback_Nexus_{
+					Nexus: &commonpb.Callback_Nexus{Url: nexus.EphemeralCallbackURL},
+				},
+			},
+		}
+
+		err := v.Validate(ctx, "ns", cbs, opts)
+		require.ErrorContains(t, err, "unknown scheme")
+	})
+
 	t.Run("TooManyCallbacks", func(t *testing.T) {
 		cbs := []*commonpb.Callback{
 			newNexusCallback(),

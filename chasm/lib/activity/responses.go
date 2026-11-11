@@ -360,6 +360,9 @@ func (a *Activity) buildCallbackInfos(ctx chasm.Context) ([]*apiactivitypb.Callb
 	cbInfos := make([]*apiactivitypb.CallbackInfo, 0, len(a.Callbacks))
 	for _, field := range a.Callbacks {
 		cb := field.Get(ctx)
+		if ctx.IsEphemeral(cb) {
+			continue
+		}
 
 		cbInfo, err := cb.ToAPICallbackInfo(ctx)
 		if err != nil {

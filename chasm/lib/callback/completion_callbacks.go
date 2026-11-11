@@ -2,6 +2,7 @@ package callback
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/google/uuid"
 	commonpb "go.temporal.io/api/common/v1"
@@ -146,6 +147,9 @@ func ValidateAndAttach(
 	if requestID == "" {
 		return serviceerror.NewInvalidArgument("cannot attach completion callbacks without a request ID")
 	}
+	if slices.ContainsFunc(newCallbacks, isEphemeralAPICallback) {
+		return attachEphemeral(ctx, host, requestID, registrationTime, newCallbacks)
+	}
 
 	// Idempotency check.
 	if HasCallbacksForRequest(host, requestID) {
@@ -181,6 +185,9 @@ func Attach(
 ) error {
 	if len(newCallbacks) == 0 {
 		return nil
+	}
+	if slices.ContainsFunc(newCallbacks, isEphemeralAPICallback) {
+		return attachEphemeral(ctx, host, requestID, registrationTime, newCallbacks)
 	}
 	var options attachOptions
 	for _, opt := range opts {

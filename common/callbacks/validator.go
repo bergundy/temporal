@@ -167,6 +167,9 @@ func (v *validator) ValidateAdditions(
 
 func (v *validator) validateCallback(cb *commonpb.Callback, namespaceName string, opts ValidatorOptions) error {
 	kind := KindOf(cb)
+	if kind == KindEphemeral {
+		return serviceerror.NewUnimplemented("ephemeral callbacks are not supported by this API")
+	}
 
 	// For unknown callbacks, prefer the "unknown callback variant" error below.
 	if kind != KindUnknown && !slices.Contains(opts.EnabledKinds, kind) {

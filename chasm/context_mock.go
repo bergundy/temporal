@@ -37,6 +37,7 @@ type MockContext struct {
 	HandleRequestLinks                  func(component Component, requestID string) ([]*commonpb.Link, error)
 	HandleUserMetadata                  func(component Component) *sdkpb.UserMetadata
 	HandlePath                          func(component Component) []string
+	HandleIsEphemeral                   func(component Component) bool
 	HandleGetTimeSkippingPropagateState func() (*commonpb.TimeSkippingConfig, *commonpb.TimeSkippingStatePropagation)
 	HandleGetTimeSkippingInfo           func() *commonpb.TimeSkippingInfo
 
@@ -189,6 +190,13 @@ func (c *MockContext) Path(component Component) []string {
 	return nil
 }
 
+func (c *MockContext) IsEphemeral(component Component) bool {
+	if c.HandleIsEphemeral != nil {
+		return c.HandleIsEphemeral(component)
+	}
+	return false
+}
+
 func (c *MockContext) withValue(key any, value any) Context {
 	return &MockContext{
 		HandleExecutionKey:                  c.HandleExecutionKey,
@@ -203,6 +211,7 @@ func (c *MockContext) withValue(key any, value any) Context {
 		HandleRequestLinks:                  c.HandleRequestLinks,
 		HandleUserMetadata:                  c.HandleUserMetadata,
 		HandlePath:                          c.HandlePath,
+		HandleIsEphemeral:                   c.HandleIsEphemeral,
 		HandleGetTimeSkippingPropagateState: c.HandleGetTimeSkippingPropagateState,
 		HandleGetTimeSkippingInfo:           c.HandleGetTimeSkippingInfo,
 	}

@@ -533,7 +533,11 @@ func (o *Operation) buildCompletionCallbackInfos(ctx chasm.Context) ([]*apinexus
 	sortedCallbackKeys := slices.Sorted(maps.Keys(o.Callbacks))
 	infos := make([]*apinexusoperationpb.CallbackInfo, 0, len(o.Callbacks))
 	for _, id := range sortedCallbackKeys {
-		info, err := o.Callbacks[id].Get(ctx).ToAPICallbackInfo(ctx)
+		cb := o.Callbacks[id].Get(ctx)
+		if ctx.IsEphemeral(cb) {
+			continue
+		}
+		info, err := cb.ToAPICallbackInfo(ctx)
 		if err != nil {
 			return nil, err
 		}

@@ -16,11 +16,13 @@ const (
 	KindUnknown      Kind = "unknown"
 	KindNexus        Kind = "nexus"
 	KindNexusHandler Kind = "nexusHandler"
+	// KindEphemeral is only supported by direct Nexus calls, which don't use the validator, and can't be enabled.
+	KindEphemeral Kind = "ephemeral"
 )
 
 func (k Kind) String() string {
 	switch k {
-	case KindUnknown, KindNexus, KindNexusHandler:
+	case KindUnknown, KindNexus, KindNexusHandler, KindEphemeral:
 		return string(k)
 	default:
 		return string(KindUnknown)
@@ -34,6 +36,8 @@ func KindOf(cb *commonpb.Callback) Kind {
 		return KindNexus
 	case *commonpb.Callback_NexusHandler_:
 		return KindNexusHandler
+	case *commonpb.Callback_Ephemeral_:
+		return KindEphemeral
 	case *commonpb.Callback_Internal_:
 		// Internal-variant callbacks are not used and should be removed entirely.
 		return KindUnknown

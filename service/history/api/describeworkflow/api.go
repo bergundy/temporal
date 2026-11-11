@@ -504,6 +504,9 @@ func buildCallbackInfosFromChasm(
 	result := make([]*workflowpb.CallbackInfo, 0, len(wf.Callbacks))
 	for _, field := range wf.Callbacks {
 		callback := field.Get(chasmCtx)
+		if chasmCtx.IsEphemeral(callback) {
+			continue
+		}
 
 		trigger := &workflowpb.CallbackInfo_Trigger{
 			Variant: &workflowpb.CallbackInfo_Trigger_WorkflowClosed{},
@@ -531,6 +534,9 @@ func buildCallbackInfosFromChasm(
 
 		for _, ucfield := range updates.Callbacks {
 			callback := ucfield.Get(chasmCtx)
+			if chasmCtx.IsEphemeral(callback) {
+				continue
+			}
 
 			trigger := &workflowpb.CallbackInfo_Trigger{
 				Variant: &workflowpb.CallbackInfo_Trigger_UpdateWorkflowExecutionCompleted{
