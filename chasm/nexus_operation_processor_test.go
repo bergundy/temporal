@@ -178,6 +178,30 @@ func TestNexusServiceProcessor_ProcessInput(t *testing.T) {
 	}
 }
 
+func TestNexusEndpointProcessor_MergesServiceProcessors(t *testing.T) {
+	t.Parallel()
+
+	processableOp := &processableOperation{}
+	first := NewNexusServiceProcessor("test-service")
+	first.MustRegisterOperation("first", NewRegisterableNexusOperationProcessor(processableOp))
+	second := NewNexusServiceProcessor("test-service")
+	second.MustRegisterOperation("second", NewRegisterableNexusOperationProcessor(processableOp))
+
+	processor := NewNexusEndpointProcessor()
+	processor.MustRegisterServiceProcessor(first)
+	processor.MustRegisterServiceProcessor(second)
+	for _, operation := range []string{"first", "second"} {
+		result, err := processor.ProcessInput(newTestContext(), "test-service", operation, mustToPayload(t, processableInput{Value: 47}))
+		require.NoError(t, err)
+		require.NotNil(t, result.RoutingKey)
+	}
+
+	duplicate := NewNexusServiceProcessor("test-service")
+	duplicate.MustRegisterOperation("first", NewRegisterableNexusOperationProcessor(processableOp))
+	require.ErrorContains(t, processor.RegisterServiceProcessor(duplicate), "already registered")
+	require.ErrorContains(t, processor.RegisterServiceProcessor(first), "already registered")
+}
+
 func TestNexusEndpointProcessor_ProcessInput(t *testing.T) {
 	t.Parallel()
 

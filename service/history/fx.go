@@ -250,6 +250,7 @@ func HandlerProvider(args NewHandlerArgs, lc fx.Lifecycle) (*Handler, error) {
 		dlqMetricsEmitter:            args.DLQMetricsEmitter,
 		chasmEngine:                  args.ChasmEngine,
 		chasmRegistry:                args.ChasmRegistry,
+		callbackConfig:               args.CallbackConfig,
 		testHooks:                    args.TestHooks,
 
 		replicationTaskFetcherFactory:    args.ReplicationTaskFetcherFactory,
@@ -290,13 +291,69 @@ func buildNexusHandler(chasmRegistry *chasm.Registry) (nexus.Handler, error) {
 	if len(nexusServices) == 0 {
 		return nil, nil
 	}
-	serviceRegistry := nexus.NewServiceRegistry()
-	for _, svc := range nexusServices {
-		// No chance of collision here since the registry would have errored out earlier.
-		serviceRegistry.MustRegister(svc)
+	handler := &systemNexusHandler{
+		services: nexusServices,
+		handlers: make(map[*nexus.Service]nexus.Handler),
 	}
+	for _, svcs := range nexusServices {
+		for _, svc := range svcs {
+			serviceRegistry := nexus.NewServiceRegistry()
+			serviceRegistry.MustRegister(svc)
+			h, err := serviceRegistry.NewHandler()
+			if err != nil {
+				return nil, err
+			}
+			handler.handlers[svc] = h
+		}
+	}
+	return handler, nil
+}
 
-	return serviceRegistry.NewHandler()
+// systemNexusHandler dispatches system Nexus requests to the library that implements the requested operation, since
+// multiple libraries may implement operations of the same service.
+type systemNexusHandler struct {
+	nexus.UnimplementedHandler
+
+	services map[string][]*nexus.Service
+	handlers map[*nexus.Service]nexus.Handler
+}
+
+func (h *systemNexusHandler) handler(service, operation string) (nexus.Handler, error) {
+	svcs, ok := h.services[service]
+	if !ok {
+		return nil, nexus.NewHandlerErrorf(nexus.HandlerErrorTypeNotFound, "service %q not found", service)
+	}
+	for _, svc := range svcs {
+		if svc.Operation(operation) != nil {
+			return h.handlers[svc], nil
+		}
+	}
+	return nil, nexus.NewHandlerErrorf(nexus.HandlerErrorTypeNotFound, "operation %q not found", operation)
+}
+
+func (h *systemNexusHandler) StartOperation(
+	ctx context.Context,
+	service, operation string,
+	input *nexus.LazyValue,
+	options nexus.StartOperationOptions,
+) (nexus.HandlerStartOperationResult[any], error) {
+	handler, err := h.handler(service, operation)
+	if err != nil {
+		return nil, err
+	}
+	return handler.StartOperation(ctx, service, operation, input, options)
+}
+
+func (h *systemNexusHandler) CancelOperation(
+	ctx context.Context,
+	service, operation, token string,
+	options nexus.CancelOperationOptions,
+) error {
+	handler, err := h.handler(service, operation)
+	if err != nil {
+		return err
+	}
+	return handler.CancelOperation(ctx, service, operation, token, options)
 }
 
 func HistoryEngineFactoryProvider(

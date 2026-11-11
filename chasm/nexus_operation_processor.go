@@ -170,13 +170,23 @@ func NewNexusEndpointProcessor() *NexusEndpointProcessor {
 	}
 }
 
-// RegisterServiceProcessor adds a service-level processor to the endpoint keyed by its name.
-// Returns an error if a processor with the same name is already registered.
+// RegisterServiceProcessor adds a service-level processor to the endpoint keyed by its name. The operations of
+// processors registered with the same name, e.g. by different libraries, are merged.
+// Returns an error if an operation is already registered.
 func (p *NexusEndpointProcessor) RegisterServiceProcessor(processor *NexusServiceProcessor) error {
-	if _, exists := p.serviceProcessors[processor.name]; exists {
+	existing, exists := p.serviceProcessors[processor.name]
+	if !exists {
+		p.serviceProcessors[processor.name] = processor
+		return nil
+	}
+	if existing == processor {
 		return fmt.Errorf("service processor %q already registered", processor.name)
 	}
-	p.serviceProcessors[processor.name] = processor
+	for name, op := range processor.operations {
+		if err := existing.RegisterOperation(name, op); err != nil {
+			return fmt.Errorf("service processor %q: %w", processor.name, err)
+		}
+	}
 	return nil
 }
 
