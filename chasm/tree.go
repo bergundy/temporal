@@ -1598,12 +1598,6 @@ func (n *Node) componentPath(component Component) []string {
 	return refNode.path()
 }
 
-// componentIsEphemeral implements the CHASM Context interface
-func (n *Node) componentIsEphemeral(component Component) bool {
-	refNode, ok := n.valueToNode[component]
-	return ok && refNode.isEphemeral()
-}
-
 // componentLinks returns the union of links across all requests stored on the
 // given component's metadata. Pending writes staged in the current transaction
 // replace persisted entries for the same request ID (matching the read

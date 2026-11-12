@@ -33,11 +33,6 @@ func newEphemeralTestContext(options EphemeralOptions) (*chasm.MockMutableContex
 			HandleRef: func(chasm.Component) ([]byte, error) {
 				return []byte("host-ref"), nil
 			},
-			// The mock doesn't build a tree, so identify ephemeral callbacks by their URL.
-			HandleIsEphemeral: func(c chasm.Component) bool {
-				cb, ok := c.(*Callback)
-				return ok && cb.GetCallback().GetNexus().GetUrl() == commonnexus.EphemeralCallbackURL
-			},
 		},
 	}, registrar
 }
@@ -80,10 +75,29 @@ func TestAttachEphemeral(t *testing.T) {
 		require.Empty(t, host.callbacks)
 	})
 
-	t.Run("RejectsMixingWithDurableCallbacks", func(t *testing.T) {
-		ctx, _ := newEphemeralTestContext(options)
+	t.Run("AttachesAlongWithDurableCallbacks", func(t *testing.T) {
+		ctx, registrar := newEphemeralTestContext(options)
 		host := &fakeComponentHost{fakeHost: newFakeHost()}
 		cbs := nexusCallbacks(commonnexus.EphemeralCallbackURL, "http://cb-1")
+
+		require.NoError(t, ValidateAndAttach(ctx, host, "req-1", timestamppb.Now(), cbs, "ns", validator))
+		require.True(t, registrar.Registered())
+		require.Len(t, host.callbacks, 2)
+		require.Equal(t, int64(1), host.metadata.GetTotalCallbacksCount())
+
+		// A retry of the request attaches another ephemeral callback, but not the durable callback.
+		retryCtx, retryRegistrar := newEphemeralTestContext(options)
+		require.NoError(t, ValidateAndAttach(retryCtx, host, "req-1", timestamppb.Now(), cbs, "ns", validator))
+		require.True(t, retryRegistrar.Registered())
+		require.Len(t, ephemeralKeys(host), 2)
+		require.Len(t, host.callbacks, 3)
+		require.Equal(t, int64(1), host.metadata.GetTotalCallbacksCount())
+	})
+
+	t.Run("RejectsMultipleEphemeralCallbacks", func(t *testing.T) {
+		ctx, _ := newEphemeralTestContext(options)
+		host := &fakeComponentHost{fakeHost: newFakeHost()}
+		cbs := nexusCallbacks(commonnexus.EphemeralCallbackURL, commonnexus.EphemeralCallbackURL)
 
 		err := ValidateAndAttach(ctx, host, "req-1", timestamppb.Now(), cbs, "ns", validator)
 		require.ErrorAs(t, err, new(*serviceerror.InvalidArgument))

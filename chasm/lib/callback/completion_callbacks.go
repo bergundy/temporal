@@ -2,7 +2,6 @@ package callback
 
 import (
 	"fmt"
-	"slices"
 
 	"github.com/google/uuid"
 	commonpb "go.temporal.io/api/common/v1"
@@ -147,24 +146,23 @@ func ValidateAndAttach(
 	if requestID == "" {
 		return serviceerror.NewInvalidArgument("cannot attach completion callbacks without a request ID")
 	}
-	if slices.ContainsFunc(newCallbacks, isEphemeralAPICallback) {
-		return attachEphemeral(ctx, host, requestID, registrationTime, newCallbacks)
-	}
+	ephemeral, durable := splitEphemeral(newCallbacks)
 
-	// Idempotency check.
-	if HasCallbacksForRequest(host, requestID) {
-		return nil
+	// Idempotency check. Ephemeral callbacks are attached by every request that waits on the host, including
+	// retries.
+	if len(durable) > 0 && !HasCallbacksForRequest(host, requestID) {
+		if host.LifecycleState(ctx).IsClosed() {
+			return serviceerror.NewFailedPrecondition("cannot attach callbacks to a closed execution")
+		}
+		usage := UsageOf(host.CompletionCallbackMetadata())
+		if err := ValidateAdditions(namespaceName, usage, durable, validator); err != nil {
+			return err
+		}
+		if err := attachDurable(ctx, host, requestID, registrationTime, durable, opts...); err != nil {
+			return err
+		}
 	}
-
-	if host.LifecycleState(ctx).IsClosed() {
-		return serviceerror.NewFailedPrecondition("cannot attach callbacks to a closed execution")
-	}
-
-	usage := UsageOf(host.CompletionCallbackMetadata())
-	if err := ValidateAdditions(namespaceName, usage, newCallbacks, validator); err != nil {
-		return err
-	}
-	return Attach(ctx, host, requestID, registrationTime, newCallbacks, opts...)
+	return attachEphemeral(ctx, host, requestID, registrationTime, ephemeral)
 }
 
 // Attach converts newCallbacks to CHASM callback components and adds them to the host's
@@ -183,11 +181,23 @@ func Attach(
 	newCallbacks []*commonpb.Callback,
 	opts ...AttachOption,
 ) error {
+	ephemeral, durable := splitEphemeral(newCallbacks)
+	if err := attachDurable(ctx, host, requestID, registrationTime, durable, opts...); err != nil {
+		return err
+	}
+	return attachEphemeral(ctx, host, requestID, registrationTime, ephemeral)
+}
+
+func attachDurable(
+	ctx chasm.MutableContext,
+	host Host,
+	requestID string,
+	registrationTime *timestamppb.Timestamp,
+	newCallbacks []*commonpb.Callback,
+	opts ...AttachOption,
+) error {
 	if len(newCallbacks) == 0 {
 		return nil
-	}
-	if slices.ContainsFunc(newCallbacks, isEphemeralAPICallback) {
-		return attachEphemeral(ctx, host, requestID, registrationTime, newCallbacks)
 	}
 	var options attachOptions
 	for _, opt := range opts {

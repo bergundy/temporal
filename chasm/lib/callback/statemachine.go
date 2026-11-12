@@ -44,7 +44,7 @@ var TransitionScheduled = chasm.NewTransition(
 	[]callbackspb.CallbackStatus{callbackspb.CALLBACK_STATUS_STANDBY},
 	callbackspb.CALLBACK_STATUS_SCHEDULED,
 	func(cb *Callback, ctx chasm.MutableContext, event EventScheduled) error {
-		if ctx.IsEphemeral(cb) {
+		if cb.IsEphemeral() {
 			// The request that attached the callback is waiting for it to be scheduled. There's nothing to invoke.
 			return nil
 		}

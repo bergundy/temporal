@@ -61,6 +61,12 @@ func NewCallback(
 	}
 }
 
+// IsEphemeral reports whether the callback was attached by a request that waits for the outcome itself, in which
+// case it's never persisted or invoked.
+func (c *Callback) IsEphemeral() bool {
+	return c.GetCallback().GetNexus().GetUrl() == commonnexus.EphemeralCallbackURL
+}
+
 func (c *Callback) LifecycleState(_ chasm.Context) chasm.LifecycleState {
 	switch c.Status {
 	case callbackspb.CALLBACK_STATUS_SUCCEEDED:

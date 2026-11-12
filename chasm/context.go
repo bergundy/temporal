@@ -70,9 +70,6 @@ type Context interface {
 	// Each segment is the name of the field (or, for a component inside a CHASM map, the map key)
 	// that holds the component, so a path is only as stable as the field names it traverses.
 	Path(Component) []string
-	// IsEphemeral reports whether the given component is ephemeral, see ComponentFieldEphemeral.
-	// Returns false for components that are not (yet) registered as tree nodes.
-	IsEphemeral(Component) bool
 
 	// Intent() OperationIntent
 	// ComponentOptions(Component) []ComponentOption
@@ -203,10 +200,6 @@ func (c *immutableCtx) UserMetadata(component Component) *sdkpb.UserMetadata {
 
 func (c *immutableCtx) Path(component Component) []string {
 	return c.root.componentPath(component)
-}
-
-func (c *immutableCtx) IsEphemeral(component Component) bool {
-	return c.root.componentIsEphemeral(component)
 }
 
 func (c *immutableCtx) Now(_ Component) time.Time {

@@ -315,7 +315,7 @@ func getCompletionCallbacksAsProtoSlice(ctx context.Context, ms historyi.Mutable
 			cb := field.Get(ctx)
 			// Only include callbacks in STANDBY state (not already triggered). Ephemeral callbacks don't carry over,
 			// the request that attached them waits on this run.
-			if cb.Status != callbackspb.CALLBACK_STATUS_STANDBY || ctx.IsEphemeral(cb) {
+			if cb.Status != callbackspb.CALLBACK_STATUS_STANDBY || cb.IsEphemeral() {
 				continue
 			}
 			// Convert CHASM callback to API callback

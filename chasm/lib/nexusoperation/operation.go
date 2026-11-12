@@ -534,7 +534,7 @@ func (o *Operation) buildCompletionCallbackInfos(ctx chasm.Context) ([]*apinexus
 	infos := make([]*apinexusoperationpb.CallbackInfo, 0, len(o.Callbacks))
 	for _, id := range sortedCallbackKeys {
 		cb := o.Callbacks[id].Get(ctx)
-		if ctx.IsEphemeral(cb) {
+		if cb.IsEphemeral() {
 			continue
 		}
 		info, err := cb.ToAPICallbackInfo(ctx)

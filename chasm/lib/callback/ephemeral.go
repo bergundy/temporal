@@ -2,6 +2,7 @@ package callback
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"time"
 
@@ -24,6 +25,21 @@ const ephemeralCallbackKeyPrefix = "ephemeral-"
 
 func isEphemeralAPICallback(cb *commonpb.Callback) bool {
 	return cb.GetNexus().GetUrl() == commonnexus.EphemeralCallbackURL
+}
+
+// splitEphemeral separates the ephemeral callbacks from the callbacks that are attached durably.
+func splitEphemeral(cbs []*commonpb.Callback) (ephemeral, durable []*commonpb.Callback) {
+	if !slices.ContainsFunc(cbs, isEphemeralAPICallback) {
+		return nil, cbs
+	}
+	for _, cb := range cbs {
+		if isEphemeralAPICallback(cb) {
+			ephemeral = append(ephemeral, cb)
+		} else {
+			durable = append(durable, cb)
+		}
+	}
+	return ephemeral, durable
 }
 
 // EphemeralOptions configures the ephemeral callbacks of a request.
@@ -101,8 +117,11 @@ func attachEphemeral(
 	registrationTime *timestamppb.Timestamp,
 	newCallbacks []*commonpb.Callback,
 ) error {
-	if len(newCallbacks) != 1 {
-		return serviceerror.NewInvalidArgument("an ephemeral callback can't be attached along with other callbacks")
+	if len(newCallbacks) == 0 {
+		return nil
+	}
+	if len(newCallbacks) > 1 {
+		return serviceerror.NewInvalidArgument("a request can't attach more than one ephemeral callback")
 	}
 	registrar, ok := ctx.Value(ephemeralRegistrarKey{}).(*EphemeralRegistrar)
 	if !ok {
@@ -134,7 +153,7 @@ func attachEphemeral(
 			continue
 		}
 		cb := field.Get(ctx)
-		if !ctx.IsEphemeral(cb) {
+		if !cb.IsEphemeral() {
 			continue
 		}
 		// Prune callbacks whose request is no longer waiting.
