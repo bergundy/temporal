@@ -17,6 +17,7 @@ import (
 	persistencespb "go.temporal.io/server/api/persistence/v1"
 	"go.temporal.io/server/chasm"
 	nexusoperationpb "go.temporal.io/server/chasm/lib/nexusoperation/gen/nexusoperationpb/v1"
+	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/backoff"
 	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/common/dynamicconfig"
@@ -30,6 +31,7 @@ import (
 	"go.temporal.io/server/common/testing/protorequire"
 	queueserrors "go.temporal.io/server/service/history/queues/errors"
 	"go.uber.org/mock/gomock"
+	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
@@ -305,7 +307,6 @@ func TestCancellationLoadArgs_StandaloneFallsBackToRequestData(t *testing.T) {
 		HandleNow: func(chasm.Component) time.Time { return now },
 	}, nil)
 	require.NoError(t, err)
-	protorequire.ProtoEqual(t, input, args.payload)
 	require.NotSame(t, &headers, &args.headers) // Confirm we make a copy.
 	require.Equal(t, headers, args.headers)     // But they are structually equivalent.
 }
@@ -658,23 +659,11 @@ func TestCancellationInvocationTaskHandler_HTTP(t *testing.T) {
 	}
 }
 
-// testCancelProcessor implements chasm.NexusOperationProcessor[string] for system endpoint tests.
-type testCancelProcessor struct{}
-
-func (p *testCancelProcessor) ProcessInput(
-	_ chasm.NexusOperationProcessorContext,
-	_ string,
-) (*chasm.NexusOperationProcessorResult, error) {
-	return &chasm.NexusOperationProcessorResult{
-		RoutingKey: chasm.NexusOperationRoutingKeyRandom{},
-	}, nil
-}
-
 func TestCancellationInvocationTaskHandler_SystemEndpoint(t *testing.T) {
 	cases := []struct {
 		name                  string
 		setupHistoryClient    func(ctrl *gomock.Controller) *historyservicemock.MockHistoryServiceClient
-		registerProcessor     bool
+		operationToken        string
 		expectedMetricOutcome string
 		checkOutcome          func(t *testing.T, c *Cancellation)
 		// taskTimeout, if set, runs the task with this deadline and the default StateAccessBuffer and
@@ -686,7 +675,6 @@ func TestCancellationInvocationTaskHandler_SystemEndpoint(t *testing.T) {
 			// StateAccessBuffer, which is less than the default MinOutboundRequestTimeout.
 			name:              "request is made below MinOutboundRequestTimeout",
 			taskTimeout:       2400 * time.Millisecond,
-			registerProcessor: true,
 			setupHistoryClient: func(ctrl *gomock.Controller) *historyservicemock.MockHistoryServiceClient {
 				client := historyservicemock.NewMockHistoryServiceClient(ctrl)
 				client.EXPECT().CancelNexusOperation(gomock.Any(), gomock.Any()).
@@ -700,7 +688,6 @@ func TestCancellationInvocationTaskHandler_SystemEndpoint(t *testing.T) {
 		},
 		{
 			name:              "success",
-			registerProcessor: true,
 			setupHistoryClient: func(ctrl *gomock.Controller) *historyservicemock.MockHistoryServiceClient {
 				client := historyservicemock.NewMockHistoryServiceClient(ctrl)
 				client.EXPECT().CancelNexusOperation(gomock.Any(), gomock.Any()).
@@ -715,7 +702,6 @@ func TestCancellationInvocationTaskHandler_SystemEndpoint(t *testing.T) {
 		},
 		{
 			name:              "history service error - retryable",
-			registerProcessor: true,
 			setupHistoryClient: func(ctrl *gomock.Controller) *historyservicemock.MockHistoryServiceClient {
 				client := historyservicemock.NewMockHistoryServiceClient(ctrl)
 				client.EXPECT().CancelNexusOperation(gomock.Any(), gomock.Any()).
@@ -736,7 +722,6 @@ func TestCancellationInvocationTaskHandler_SystemEndpoint(t *testing.T) {
 		{
 			// The system endpoint runs on the transfer queue, which doesn't unwrap DestinationDownError.
 			name:              "history service error - retryable handler error",
-			registerProcessor: true,
 			setupHistoryClient: func(ctrl *gomock.Controller) *historyservicemock.MockHistoryServiceClient {
 				client := historyservicemock.NewMockHistoryServiceClient(ctrl)
 				client.EXPECT().CancelNexusOperation(gomock.Any(), gomock.Any()).
@@ -751,7 +736,6 @@ func TestCancellationInvocationTaskHandler_SystemEndpoint(t *testing.T) {
 		},
 		{
 			name:              "history service error - InvalidArgument",
-			registerProcessor: true,
 			setupHistoryClient: func(ctrl *gomock.Controller) *historyservicemock.MockHistoryServiceClient {
 				client := historyservicemock.NewMockHistoryServiceClient(ctrl)
 				client.EXPECT().CancelNexusOperation(gomock.Any(), gomock.Any()).
@@ -772,22 +756,25 @@ func TestCancellationInvocationTaskHandler_SystemEndpoint(t *testing.T) {
 			},
 		},
 		{
-			name:              "chasm processor error",
-			registerProcessor: false,
+			name:           "routes by the operation token's business ID",
+			operationToken: mustEncodeNexusOperationToken(t, "business-id"),
 			setupHistoryClient: func(ctrl *gomock.Controller) *historyservicemock.MockHistoryServiceClient {
-				return historyservicemock.NewMockHistoryServiceClient(ctrl)
+				client := historyservicemock.NewMockHistoryServiceClient(ctrl)
+				client.EXPECT().CancelNexusOperation(gomock.Any(), gomock.Any()).DoAndReturn(
+					func(
+						_ context.Context,
+						req *historyservice.CancelNexusOperationRequest,
+						_ ...grpc.CallOption,
+					) (*historyservice.CancelNexusOperationResponse, error) {
+						require.Equal(t, common.WorkflowIDToHistoryShard(req.GetNamespaceId(), "business-id", 4), req.GetShardId())
+						require.Equal(t, mustEncodeNexusOperationToken(t, "business-id"), req.GetRequest().GetOperationToken())
+						return &historyservice.CancelNexusOperationResponse{}, nil
+					})
+				return client
 			},
-			expectedMetricOutcome: "operation-processor-failed",
+			expectedMetricOutcome: "successful",
 			checkOutcome: func(t *testing.T, c *Cancellation) {
-				require.Equal(t, nexusoperationpb.CANCELLATION_STATUS_FAILED, c.Status)
-				protorequire.ProtoEqual(t, &failurepb.Failure{
-					Message: `service "service" not found`,
-					FailureInfo: &failurepb.Failure_NexusHandlerFailureInfo{
-						NexusHandlerFailureInfo: &failurepb.NexusHandlerFailureInfo{
-							Type: string(nexus.HandlerErrorTypeNotFound),
-						},
-					},
-				}, c.LastAttemptFailure)
+				require.Equal(t, nexusoperationpb.CANCELLATION_STATUS_SUCCEEDED, c.Status)
 			},
 		},
 	}
@@ -805,7 +792,7 @@ func TestCancellationInvocationTaskHandler_SystemEndpoint(t *testing.T) {
 					ScheduledTime:  timestamppb.Now(),
 					StartedTime:    timestamppb.Now(),
 					RequestId:      "request-id",
-					OperationToken: "op-token",
+					OperationToken: cmp.Or(tc.operationToken, "op-token"),
 					Attempt:        1,
 				},
 			}
@@ -831,14 +818,7 @@ func TestCancellationInvocationTaskHandler_SystemEndpoint(t *testing.T) {
 			env.handler.historyClient = historyClient
 			env.handler.config.NumHistoryShards = 4
 
-			reg := chasm.NewRegistry(log.NewNoopLogger())
-			if tc.registerProcessor {
-				serviceProc := chasm.NewNexusServiceProcessor("service")
-				serviceProc.MustRegisterOperation("operation",
-					chasm.NewRegisterableNexusOperationProcessor(&testCancelProcessor{}))
-				reg.NexusEndpointProcessor.MustRegisterServiceProcessor(serviceProc)
-			}
-			env.handler.chasmRegistry = reg
+			env.handler.chasmRegistry = chasm.NewRegistry(log.NewNoopLogger())
 
 			env.setupReadComponent()
 			env.setupUpdateComponent()
@@ -862,4 +842,10 @@ func TestCancellationInvocationTaskHandler_SystemEndpoint(t *testing.T) {
 			require.Equal(t, tc.expectedMetricOutcome, timerRecordings[0].Tags["outcome"])
 		})
 	}
+}
+
+func mustEncodeNexusOperationToken(t *testing.T, businessID string) string {
+	token, err := chasm.NexusOperationToken[struct{}]{BusinessID: businessID}.Encode()
+	require.NoError(t, err)
+	return token
 }

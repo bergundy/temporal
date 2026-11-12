@@ -5,7 +5,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/nexus-rpc/sdk-go/nexus"
 	commonpb "go.temporal.io/api/common/v1"
+	errordetailspb "go.temporal.io/api/errordetails/v1"
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/api/workflowservice/v1/workflowservicenexus"
@@ -40,7 +42,43 @@ func (s *directNexusCallTestSuite) newTestEnv(opts ...testcore.TestOption) *stan
 	cluster.OverrideDynamicConfig(s.T(), activity.Enabled, enabled)
 	cluster.OverrideDynamicConfig(s.T(), activity.EnableCallbacks, enabled)
 	cluster.OverrideDynamicConfig(s.T(), dynamicconfig.FrontendEnableDirectNexusCalls, enabled)
+	cluster.OverrideDynamicConfig(s.T(), dynamicconfig.EnableCHASMSkipCleanUpdates, enabled)
 	return env
+}
+
+// stateTransitionCount returns the activity's state transition count, which tells whether it was written.
+func (s *directNexusCallTestSuite) stateTransitionCount(env *standaloneActivityEnv, activityID string) int64 {
+	resp, err := env.FrontendClient().DescribeActivityExecution(s.Context(), &workflowservice.DescribeActivityExecutionRequest{
+		Namespace:  env.Namespace().String(),
+		ActivityId: activityID,
+	})
+	s.Require().NoError(err)
+	return resp.GetInfo().GetStateTransitionCount()
+}
+
+func (s *directNexusCallTestSuite) cancelRequest(
+	env *standaloneActivityEnv,
+	token string,
+) *workflowservice.CancelNexusOperationRequest {
+	return &workflowservice.CancelNexusOperationRequest{
+		Namespace:      env.Namespace().String(),
+		Endpoint:       commonnexus.SystemEndpoint,
+		Service:        workflowservicenexus.TemporalAPIWorkflowserviceV1WorkflowService.ServiceName,
+		Operation:      workflowservicenexus.TemporalAPIWorkflowserviceV1WorkflowService.PollActivityExecution.Name(),
+		OperationToken: token,
+	}
+}
+
+// requireHandlerFailure asserts that err carries a Nexus handler error of the given type.
+func (s *directNexusCallTestSuite) requireHandlerFailure(err error, handlerErrorType nexus.HandlerErrorType) {
+	s.Require().Error(err)
+	for _, detail := range serviceerror.ToStatus(err).Details() {
+		if handlerFailure, ok := detail.(*errordetailspb.NexusHandlerFailure); ok {
+			s.Equal(string(handlerErrorType), handlerFailure.GetFailure().GetNexusHandlerFailureInfo().GetType())
+			return
+		}
+	}
+	s.Fail("expected a NexusHandlerFailure detail", "error: %v", err)
 }
 
 func (s *directNexusCallTestSuite) pollActivityExecutionRequest(
@@ -129,6 +167,7 @@ func (s *directNexusCallTestSuite) TestPollActivityExecution_AlreadyCompleted() 
 	taskQueue := testcore.RandomizeStr(s.T().Name())
 	startResp := env.startAndValidateActivity(s.Context(), s.T(), activityID, taskQueue)
 	s.completeActivity(env, activityID, taskQueue, startResp.RunId)
+	transitions := s.stateTransitionCount(env, activityID)
 
 	resp, err := env.FrontendClient().StartNexusOperation(
 		s.Context(),
@@ -136,6 +175,7 @@ func (s *directNexusCallTestSuite) TestPollActivityExecution_AlreadyCompleted() 
 	)
 	s.Require().NoError(err)
 	s.requireCompleted(resp, startResp.RunId)
+	s.Equal(transitions, s.stateTransitionCount(env, activityID), "polling a closed activity shouldn't write it")
 }
 
 func (s *directNexusCallTestSuite) TestPollActivityExecution_LongPollTimeout() {
@@ -148,12 +188,14 @@ func (s *directNexusCallTestSuite) TestPollActivityExecution_LongPollTimeout() {
 	taskQueue := testcore.RandomizeStr(s.T().Name())
 	startResp := env.startAndValidateActivity(s.Context(), s.T(), activityID, taskQueue)
 	request := s.pollActivityExecutionRequest(env, activityID, uuid.NewString(), true)
+	transitions := s.stateTransitionCount(env, activityID)
 
 	// The operation is still running when the long poll times out.
 	resp, err := env.FrontendClient().StartNexusOperation(s.Context(), request)
 	s.Require().NoError(err)
 	s.Require().NotNil(resp.GetAsyncSuccess(), "expected an async response, got %v", resp)
 	s.NotEmpty(resp.GetAsyncSuccess().GetOperationToken())
+	s.Equal(transitions, s.stateTransitionCount(env, activityID), "attaching an ephemeral callback shouldn't write")
 
 	// Re-issuing the same request returns the outcome once the activity completes.
 	s.completeActivity(env, activityID, taskQueue, startResp.RunId)
@@ -174,6 +216,40 @@ func (s *directNexusCallTestSuite) TestPollActivityExecution_WithoutCallbackRetu
 	)
 	s.Require().NoError(err)
 	s.NotNil(resp.GetAsyncSuccess(), "expected an async response, got %v", resp)
+}
+
+func (s *directNexusCallTestSuite) TestCancelNexusOperation() {
+	env := s.newTestEnv()
+	activityID := testcore.RandomizeStr(s.T().Name())
+	taskQueue := testcore.RandomizeStr(s.T().Name())
+	env.startAndValidateActivity(s.Context(), s.T(), activityID, taskQueue)
+
+	resp, err := env.FrontendClient().StartNexusOperation(
+		s.Context(),
+		s.pollActivityExecutionRequest(env, activityID, uuid.NewString(), false),
+	)
+	s.Require().NoError(err)
+	token := resp.GetAsyncSuccess().GetOperationToken()
+	s.Require().NotEmpty(token, "expected an async response, got %v", resp)
+
+	// The token routes the request to the activity's shard, where canceling the wait is a no-op.
+	_, err = env.FrontendClient().CancelNexusOperation(s.Context(), s.cancelRequest(env, token))
+	s.NoError(err)
+
+	s.RunSequential("InvalidToken", func(s *directNexusCallTestSuite) {
+		_, err := env.FrontendClient().CancelNexusOperation(s.Context(), s.cancelRequest(env, "invalid"))
+		var invalidArgument *serviceerror.InvalidArgument
+		s.ErrorAs(err, &invalidArgument)
+		s.requireHandlerFailure(err, nexus.HandlerErrorTypeBadRequest)
+	})
+
+	s.RunSequential("NonSystemEndpoint", func(s *directNexusCallTestSuite) {
+		request := s.cancelRequest(env, token)
+		request.Endpoint = "some-endpoint"
+		_, err := env.FrontendClient().CancelNexusOperation(s.Context(), request)
+		var unimplemented *serviceerror.Unimplemented
+		s.ErrorAs(err, &unimplemented)
+	})
 }
 
 func (s *directNexusCallTestSuite) TestValidation() {
@@ -207,6 +283,7 @@ func (s *directNexusCallTestSuite) TestValidation() {
 		_, err := env.FrontendClient().StartNexusOperation(s.Context(), request)
 		var notFound *serviceerror.NotFound
 		s.ErrorAs(err, &notFound)
+		s.requireHandlerFailure(err, nexus.HandlerErrorTypeNotFound)
 	})
 
 	s.RunSequential("Disabled", func(s *directNexusCallTestSuite) {

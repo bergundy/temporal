@@ -4,7 +4,6 @@ import (
 	"maps"
 	"time"
 
-	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	failurepb "go.temporal.io/api/failure/v1"
 	"go.temporal.io/api/serviceerror"
@@ -68,7 +67,6 @@ type cancelArgs struct {
 	scheduleToCloseTimeout time.Duration
 	startToCloseTimeout    time.Duration
 	headers                map[string]string
-	payload                *commonpb.Payload
 }
 
 func (c *Cancellation) onCompleted(ctx chasm.MutableContext) error {
@@ -124,7 +122,6 @@ func (c *Cancellation) loadArgs(
 		scheduleToCloseTimeout: op.GetScheduleToCloseTimeout().AsDuration(),
 		startToCloseTimeout:    op.GetStartToCloseTimeout().AsDuration(),
 		headers:                maps.Clone(invocationData.Header),
-		payload:                invocationData.Input,
 	}, nil
 }
 

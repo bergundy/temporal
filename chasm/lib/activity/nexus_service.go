@@ -2,8 +2,6 @@ package activity
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 
 	"github.com/nexus-rpc/sdk-go/nexus"
 	commonpb "go.temporal.io/api/common/v1"
@@ -17,8 +15,6 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-var errActivityClosed = errors.New("activity is closed")
-
 // pollActivityExecutionOperation implements the PollActivityExecution system Nexus operation. It completes
 // synchronously with the activity's outcome if the activity is closed. Otherwise it attaches the request's callback to
 // the activity and completes asynchronously.
@@ -28,10 +24,10 @@ type pollActivityExecutionOperation struct {
 	handler *handler
 }
 
-// pollActivityExecutionToken is the operation token of an asynchronous PollActivityExecution operation.
-type pollActivityExecutionToken struct {
-	ActivityID string `json:"activity_id"`
-	RunID      string `json:"run_id"`
+// pollActivityExecutionTokenData is the operation-specific part of the token of an asynchronous PollActivityExecution
+// operation, whose business ID is the activity ID.
+type pollActivityExecutionTokenData struct {
+	RunID string `json:"rid"`
 }
 
 func (o *pollActivityExecutionOperation) Name() string {
@@ -57,78 +53,63 @@ func (o *pollActivityExecutionOperation) Start(
 		RunID:       req.GetRunId(),
 	})
 
-	response, err := o.responseIfClosed(ctx, ref)
-	if err != nil {
-		return nil, err
+	type result struct {
+		response *workflowservice.PollActivityExecutionResponse
+		runID    string
 	}
-	if response != nil {
-		return &nexus.HandlerStartOperationResultSync[*workflowservice.PollActivityExecutionResponse]{Value: response}, nil
-	}
-
-	runID, _, err := chasm.UpdateComponent(ctx, ref, func(
+	// Neither path makes a durable change, so the update isn't persisted.
+	res, _, err := chasm.UpdateComponent(ctx, ref, func(
 		a *Activity,
 		ctx chasm.MutableContext,
 		_ struct{},
-	) (string, error) {
+	) (result, error) {
 		if a.LifecycleState(ctx).IsClosed() {
-			return "", errActivityClosed
+			return result{response: a.buildPollActivityExecutionResponse(ctx).GetFrontendResponse()}, nil
 		}
-		if options.CallbackURL == "" {
-			return ctx.ExecutionKey().RunID, nil
+		if options.CallbackURL != "" {
+			cb := &commonpb.Callback{
+				Variant: &commonpb.Callback_Nexus_{
+					Nexus: &commonpb.Callback_Nexus{Url: options.CallbackURL, Header: options.CallbackHeader},
+				},
+			}
+			err := callback.ValidateAndAttach(
+				ctx,
+				a,
+				options.RequestID,
+				timestamppb.New(ctx.Now(a)),
+				[]*commonpb.Callback{cb},
+				req.GetNamespace(),
+				o.handler.callbackValidator,
+			)
+			if err != nil {
+				return result{}, err
+			}
 		}
-		cb := &commonpb.Callback{
-			Variant: &commonpb.Callback_Nexus_{
-				Nexus: &commonpb.Callback_Nexus{Url: options.CallbackURL, Header: options.CallbackHeader},
-			},
-		}
-		return ctx.ExecutionKey().RunID, callback.ValidateAndAttach(
-			ctx,
-			a,
-			options.RequestID,
-			timestamppb.New(ctx.Now(a)),
-			[]*commonpb.Callback{cb},
-			req.GetNamespace(),
-			o.handler.callbackValidator,
-		)
+		return result{runID: ctx.ExecutionKey().RunID}, nil
 	}, struct{}{})
-	if errors.Is(err, errActivityClosed) {
-		// Closed after the check above.
-		response, err = o.responseIfClosed(ctx, ref)
-		if err != nil {
-			return nil, err
-		}
-		return &nexus.HandlerStartOperationResultSync[*workflowservice.PollActivityExecutionResponse]{Value: response}, nil
-	}
 	if err != nil {
 		return nil, err
 	}
-
-	token, err := json.Marshal(pollActivityExecutionToken{ActivityID: req.GetActivityId(), RunID: runID})
-	if err != nil {
-		return nil, serviceerror.NewInternalf("failed to encode operation token: %v", err)
+	if res.response != nil {
+		return &nexus.HandlerStartOperationResultSync[*workflowservice.PollActivityExecutionResponse]{Value: res.response}, nil
 	}
-	return &nexus.HandlerStartOperationResultAsync{OperationToken: string(token)}, nil
+
+	token, err := chasm.NexusOperationToken[pollActivityExecutionTokenData]{
+		BusinessID: req.GetActivityId(),
+		Data:       pollActivityExecutionTokenData{RunID: res.runID},
+	}.Encode()
+	if err != nil {
+		return nil, serviceerror.NewInternal(err.Error())
+	}
+	return &nexus.HandlerStartOperationResultAsync{OperationToken: token}, nil
 }
 
 // Cancel is a no-op: waiting for an activity's outcome doesn't affect the activity.
-func (o *pollActivityExecutionOperation) Cancel(context.Context, string, nexus.CancelOperationOptions) error {
+func (o *pollActivityExecutionOperation) Cancel(_ context.Context, token string, _ nexus.CancelOperationOptions) error {
+	if _, err := chasm.DecodeNexusOperationToken[pollActivityExecutionTokenData](token); err != nil {
+		return nexus.NewHandlerErrorf(nexus.HandlerErrorTypeBadRequest, "invalid operation token: %v", err)
+	}
 	return nil
-}
-
-func (o *pollActivityExecutionOperation) responseIfClosed(
-	ctx context.Context,
-	ref chasm.ComponentRef,
-) (*workflowservice.PollActivityExecutionResponse, error) {
-	return chasm.ReadComponent(ctx, ref, func(
-		a *Activity,
-		ctx chasm.Context,
-		_ struct{},
-	) (*workflowservice.PollActivityExecutionResponse, error) {
-		if !a.LifecycleState(ctx).IsClosed() {
-			return nil, nil
-		}
-		return a.buildPollActivityExecutionResponse(ctx).GetFrontendResponse(), nil
-	}, struct{}{})
 }
 
 // pollActivityExecutionProcessor validates PollActivityExecution operation inputs and routes them to the activity's

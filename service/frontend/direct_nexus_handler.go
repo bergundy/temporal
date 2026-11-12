@@ -9,6 +9,7 @@ import (
 	commonpb "go.temporal.io/api/common/v1"
 	nexuspb "go.temporal.io/api/nexus/v1"
 	"go.temporal.io/api/serviceerror"
+	"go.temporal.io/api/temporalnexus"
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/server/api/historyservice/v1"
 	"go.temporal.io/server/chasm"
@@ -34,14 +35,14 @@ func (wh *WorkflowHandler) StartNexusOperation(
 	if !wh.config.EnableDirectNexusCalls(request.GetNamespace()) {
 		return nil, errDirectNexusCallsDisabled
 	}
-	if request.GetEndpoint() != commonnexus.SystemEndpoint {
-		return nil, serviceerror.NewUnimplemented("StartNexusOperation only supports the system Nexus endpoint")
-	}
-	if request.GetService() == "" || request.GetOperation() == "" {
-		return nil, serviceerror.NewInvalidArgument("service and operation are required")
-	}
-	if len(request.GetNexusHeader()) > 0 {
-		return nil, serviceerror.NewInvalidArgument("Nexus headers are not supported for the system Nexus endpoint")
+	err := validateDirectNexusRequest(
+		request.GetEndpoint(),
+		request.GetService(),
+		request.GetOperation(),
+		request.GetNexusHeader(),
+	)
+	if err != nil {
+		return nil, err
 	}
 	var callbackURL string
 	switch cb := request.GetCompletionCallback(); {
@@ -55,9 +56,13 @@ func (wh *WorkflowHandler) StartNexusOperation(
 	if requestID == "" {
 		requestID = uuid.NewString()
 	}
-	links, err := apiLinksToNexusLinks(request.GetLinks())
-	if err != nil {
-		return nil, err
+	links := make([]*nexuspb.Link, 0, len(request.GetLinks()))
+	for _, link := range request.GetLinks() {
+		nexusLink, ok := temporalnexus.CommonLinkToNexusLink(link)
+		if !ok {
+			return nil, serviceerror.NewInvalidArgumentf("unsupported link: %v", link)
+		}
+		links = append(links, nexusLink)
 	}
 	ns, err := wh.namespaceRegistry.GetNamespace(namespace.Name(request.GetNamespace()))
 	if err != nil {
@@ -67,13 +72,18 @@ func (wh *WorkflowHandler) StartNexusOperation(
 	processed, err := wh.registry.NexusEndpointProcessor.ProcessInput(chasm.NexusOperationProcessorContext{
 		Namespace:               ns,
 		RequestID:               requestID,
-		Links:                   links,
+		Links:                   commonnexus.ConvertLinksFromProto(links),
 		ReserializeInputPayload: true,
 	}, request.GetService(), request.GetOperation(), request.GetInput())
 	if err != nil {
-		return nil, nexusHandlerErrorToServiceError(err)
+		var handlerErr *nexus.HandlerError
+		if errors.As(err, &handlerErr) {
+			return nil, commonnexus.HandlerErrorToServiceError(handlerErr)
+		}
+		return nil, err
 	}
 
+	// Handler errors are returned as gRPC errors that carry them.
 	resp, err := wh.historyClient.StartNexusOperation(ctx, &historyservice.StartNexusOperationRequest{
 		NamespaceId: ns.ID().String(),
 		ShardId:     processed.RoutingKey.ShardID(wh.config.NumHistoryShards),
@@ -83,7 +93,7 @@ func (wh *WorkflowHandler) StartNexusOperation(
 			RequestId: requestID,
 			Callback:  callbackURL,
 			Payload:   processed.ReserializedInputPayload,
-			Links:     commonnexus.ConvertLinksToProto(links),
+			Links:     links,
 		},
 	})
 	if err != nil {
@@ -96,7 +106,7 @@ func (wh *WorkflowHandler) StartNexusOperation(
 			Variant: &workflowservice.StartNexusOperationResponse_SyncSuccess{
 				SyncSuccess: &workflowservice.StartNexusOperationResponse_Sync{
 					Payload: variant.SyncSuccess.GetPayload(),
-					Links:   wh.nexusLinksToAPILinks(variant.SyncSuccess.GetLinks()),
+					Links:   nexusLinksToCommonLinks(variant.SyncSuccess.GetLinks()),
 				},
 			},
 		}, nil
@@ -105,7 +115,7 @@ func (wh *WorkflowHandler) StartNexusOperation(
 			Variant: &workflowservice.StartNexusOperationResponse_AsyncSuccess{
 				AsyncSuccess: &workflowservice.StartNexusOperationResponse_Async{
 					OperationToken: variant.AsyncSuccess.GetOperationToken(),
-					Links:          wh.nexusLinksToAPILinks(variant.AsyncSuccess.GetLinks()),
+					Links:          nexusLinksToCommonLinks(variant.AsyncSuccess.GetLinks()),
 				},
 			},
 		}, nil
@@ -118,55 +128,77 @@ func (wh *WorkflowHandler) StartNexusOperation(
 	}
 }
 
-// CancelNexusOperation requests cancellation of an operation started via StartNexusOperation.
+// CancelNexusOperation requests cancellation of an operation started via StartNexusOperation. System Nexus operations
+// are routed by their token, see chasm.NexusOperationToken.
 func (wh *WorkflowHandler) CancelNexusOperation(
-	_ context.Context,
+	ctx context.Context,
 	request *workflowservice.CancelNexusOperationRequest,
-) (*workflowservice.CancelNexusOperationResponse, error) {
+) (_ *workflowservice.CancelNexusOperationResponse, retError error) {
+	defer log.CapturePanic(wh.logger, &retError)
+
 	if request == nil {
 		return nil, errRequestNotSet
 	}
 	if !wh.config.EnableDirectNexusCalls(request.GetNamespace()) {
 		return nil, errDirectNexusCallsDisabled
 	}
-	// System Nexus operations are routed by their input, which a cancel request doesn't have.
-	return nil, serviceerror.NewUnimplemented("CancelNexusOperation is not supported for the system Nexus endpoint")
+	err := validateDirectNexusRequest(
+		request.GetEndpoint(),
+		request.GetService(),
+		request.GetOperation(),
+		request.GetNexusHeader(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	token := request.GetOperationToken()
+	if token == "" {
+		return nil, serviceerror.NewInvalidArgument("operation token is required")
+	}
+	if limit := wh.config.MaxNexusOperationTokenLength(request.GetNamespace()); len(token) > limit {
+		return nil, serviceerror.NewInvalidArgumentf("operation token length exceeds allowed limit (%d/%d)", len(token), limit)
+	}
+	ns, err := wh.namespaceRegistry.GetNamespace(namespace.Name(request.GetNamespace()))
+	if err != nil {
+		return nil, err
+	}
+
+	// Handler errors are returned as gRPC errors that carry them.
+	routingKey := chasm.NexusOperationTokenRoutingKey(ns.ID().String(), token)
+	_, err = wh.historyClient.CancelNexusOperation(ctx, &historyservice.CancelNexusOperationRequest{
+		NamespaceId: ns.ID().String(),
+		ShardId:     routingKey.ShardID(wh.config.NumHistoryShards),
+		Request: &nexuspb.CancelOperationRequest{
+			Service:        request.GetService(),
+			Operation:      request.GetOperation(),
+			OperationToken: token,
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &workflowservice.CancelNexusOperationResponse{}, nil
 }
 
-func (wh *WorkflowHandler) nexusLinksToAPILinks(links []*nexuspb.Link) []*commonpb.Link {
-	return commonnexus.ConvertNexusLinksToProtoLinks(commonnexus.ConvertLinksFromProto(links), wh.logger)
+func validateDirectNexusRequest(endpoint, service, operation string, header map[string]string) error {
+	if endpoint != commonnexus.SystemEndpoint {
+		return serviceerror.NewUnimplemented("direct Nexus calls only support the system Nexus endpoint")
+	}
+	if service == "" || operation == "" {
+		return serviceerror.NewInvalidArgument("service and operation are required")
+	}
+	if len(header) > 0 {
+		return serviceerror.NewInvalidArgument("Nexus headers are not supported for the system Nexus endpoint")
+	}
+	return nil
 }
 
-func apiLinksToNexusLinks(links []*commonpb.Link) ([]nexus.Link, error) {
-	nexusLinks := make([]nexus.Link, 0, len(links))
+func nexusLinksToCommonLinks(links []*nexuspb.Link) []*commonpb.Link {
+	commonLinks := make([]*commonpb.Link, 0, len(links))
 	for _, link := range links {
-		switch variant := link.GetVariant().(type) {
-		case *commonpb.Link_WorkflowEvent_:
-			nexusLinks = append(nexusLinks, commonnexus.ConvertLinkWorkflowEventToNexusLink(variant.WorkflowEvent))
-		case *commonpb.Link_Activity_:
-			nexusLinks = append(nexusLinks, commonnexus.ConvertLinkActivityToNexusLink(variant.Activity))
-		case *commonpb.Link_NexusOperation_:
-			nexusLinks = append(nexusLinks, commonnexus.ConvertLinkNexusOperationToNexusLink(variant.NexusOperation))
-		default:
-			return nil, serviceerror.NewInvalidArgumentf("unsupported link variant: %T", variant)
+		if commonLink, ok := temporalnexus.NexusLinkToCommonLink(link); ok {
+			commonLinks = append(commonLinks, commonLink)
 		}
 	}
-	return nexusLinks, nil
-}
-
-// nexusHandlerErrorToServiceError converts the Nexus handler errors returned by system operation processors, e.g.
-// for unknown services or operations.
-func nexusHandlerErrorToServiceError(err error) error {
-	var handlerErr *nexus.HandlerError
-	if !errors.As(err, &handlerErr) {
-		return err
-	}
-	switch handlerErr.Type {
-	case nexus.HandlerErrorTypeNotFound:
-		return serviceerror.NewNotFound(handlerErr.Error())
-	case nexus.HandlerErrorTypeBadRequest:
-		return serviceerror.NewInvalidArgument(handlerErr.Error())
-	default:
-		return serviceerror.NewInternal(handlerErr.Error())
-	}
+	return commonLinks
 }

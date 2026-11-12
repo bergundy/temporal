@@ -2665,7 +2665,7 @@ func (h *Handler) startNexusOperation(
 			}, nil
 		}
 		// TODO: redact certain errors
-		return nil, err
+		return nil, nexusHandlerErrorToServiceError(err)
 	}
 	links := nexus.HandlerLinks(ctx)
 
@@ -2748,12 +2748,21 @@ func (h *Handler) CancelNexusOperation(
 	err := h.nexusHandler.CancelOperation(ctx, req.GetRequest().GetService(), req.GetRequest().GetOperation(), req.GetRequest().GetOperationToken(), options)
 	if err != nil {
 		// TODO: redact certain errors
-		return nil, err
+		return nil, nexusHandlerErrorToServiceError(err)
 	}
 
 	return &historyservice.CancelNexusOperationResponse{
 		Response: &nexuspb.CancelOperationResponse{},
 	}, nil
+}
+
+// nexusHandlerErrorToServiceError converts the Nexus handler errors returned by system Nexus operations to gRPC errors
+// that carry them. Other errors, e.g. service errors returned by the operations, are returned as is.
+func nexusHandlerErrorToServiceError(err error) error {
+	if handlerErr, ok := errors.AsType[*nexus.HandlerError](err); ok {
+		return commonnexus.HandlerErrorToServiceError(handlerErr)
+	}
+	return err
 }
 
 func createLazyValueFromPayload(payload *commonpb.Payload) *nexus.LazyValue {

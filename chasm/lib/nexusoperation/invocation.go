@@ -247,7 +247,7 @@ func (i *invocationSystem) Start(
 		},
 	})
 	if err != nil {
-		return nil, err
+		return nil, unwrapSystemHandlerError(err)
 	}
 
 	result := &nexusrpc.ClientStartOperationResponse[*commonpb.Payload]{}
@@ -293,23 +293,23 @@ func (i *invocationSystem) Cancel(
 	args cancelArgs,
 	_ nexus.CancelOperationOptions,
 ) error {
-	res, err := i.chasmRegistry.NexusEndpointProcessor.ProcessInput(chasm.NexusOperationProcessorContext{
-		Namespace: i.ns,
-		RequestID: args.requestID,
-		// Links are not needed for cancellation.
-	}, args.service, args.operation, args.payload)
-	if err != nil {
-		return fmt.Errorf("%w: %w", errOpProcessorFailed, err)
-	}
-
-	_, err = i.historyClient.CancelNexusOperation(ctx, &historyservice.CancelNexusOperationRequest{
+	routingKey := chasm.NexusOperationTokenRoutingKey(i.ns.ID().String(), args.token)
+	_, err := i.historyClient.CancelNexusOperation(ctx, &historyservice.CancelNexusOperationRequest{
 		NamespaceId: i.ns.ID().String(),
-		ShardId:     res.RoutingKey.ShardID(i.config.NumHistoryShards),
+		ShardId:     routingKey.ShardID(i.config.NumHistoryShards),
 		Request: &nexuspb.CancelOperationRequest{
 			Service:        args.service,
 			Operation:      args.operation,
 			OperationToken: args.token,
 		},
 	})
+	return unwrapSystemHandlerError(err)
+}
+
+// unwrapSystemHandlerError restores the Nexus handler errors that the history service returns as gRPC errors.
+func unwrapSystemHandlerError(err error) error {
+	if handlerErr, ok := commonnexus.HandlerErrorFromServiceError(err); ok {
+		return handlerErr
+	}
 	return err
 }

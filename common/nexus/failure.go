@@ -19,6 +19,7 @@ import (
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/nexus/nexusrpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
@@ -492,6 +493,79 @@ func CallerRPSLimitError(err error) error {
 		return nil
 	}
 	return &serviceerror.ResourceExhausted{Cause: details.Cause, Scope: details.Scope, Message: cause.Failure.Message}
+}
+
+// HandlerErrorToServiceError converts a Nexus handler error to a gRPC error whose status code is derived from the
+// handler error type, with a NexusHandlerFailure detail carrying the handler error. This is how the direct
+// StartNexusOperation and CancelNexusOperation APIs return handler errors.
+func HandlerErrorToServiceError(handlerErr *nexus.HandlerError) error {
+	nexusFailure, err := nexusrpc.DefaultFailureConverter().ErrorToFailure(handlerErr)
+	if err != nil {
+		return serviceerror.NewInternalf("failed to convert Nexus handler error: %v", err)
+	}
+	failure, err := NexusFailureToTemporalFailure(nexusFailure)
+	if err != nil {
+		return serviceerror.NewInternalf("failed to convert Nexus handler error: %v", err)
+	}
+	st, err := status.New(handlerErrorTypeToCode(handlerErr.Type), handlerErr.Error()).
+		WithDetails(&errordetailspb.NexusHandlerFailure{Failure: failure})
+	if err != nil {
+		return serviceerror.NewInternalf("failed to convert Nexus handler error: %v", err)
+	}
+	return serviceerror.FromStatus(st)
+}
+
+// HandlerErrorFromServiceError returns the Nexus handler error carried by an error created with
+// HandlerErrorToServiceError.
+func HandlerErrorFromServiceError(err error) (*nexus.HandlerError, bool) {
+	if err == nil {
+		return nil, false
+	}
+	for _, detail := range serviceerror.ToStatus(err).Details() {
+		handlerFailure, ok := detail.(*errordetailspb.NexusHandlerFailure)
+		if !ok {
+			continue
+		}
+		nexusFailure, err := TemporalFailureToNexusFailure(handlerFailure.GetFailure())
+		if err != nil {
+			return nil, false
+		}
+		convertedErr, err := nexusrpc.DefaultFailureConverter().FailureToError(nexusFailure)
+		if err != nil {
+			return nil, false
+		}
+		var handlerErr *nexus.HandlerError
+		if errors.As(convertedErr, &handlerErr) {
+			return handlerErr, true
+		}
+	}
+	return nil, false
+}
+
+// handlerErrorTypeToCode is the inverse of the mapping in ConvertGRPCError.
+func handlerErrorTypeToCode(t nexus.HandlerErrorType) codes.Code {
+	switch t {
+	case nexus.HandlerErrorTypeBadRequest:
+		return codes.InvalidArgument
+	case nexus.HandlerErrorTypeUnauthenticated:
+		return codes.Unauthenticated
+	case nexus.HandlerErrorTypeUnauthorized:
+		return codes.PermissionDenied
+	case nexus.HandlerErrorTypeNotFound:
+		return codes.NotFound
+	case nexus.HandlerErrorTypeConflict:
+		return codes.AlreadyExists
+	case nexus.HandlerErrorTypeResourceExhausted:
+		return codes.ResourceExhausted
+	case nexus.HandlerErrorTypeNotImplemented:
+		return codes.Unimplemented
+	case nexus.HandlerErrorTypeUnavailable:
+		return codes.Unavailable
+	case nexus.HandlerErrorTypeRequestTimeout, nexus.HandlerErrorTypeUpstreamTimeout:
+		return codes.DeadlineExceeded
+	default:
+		return codes.Internal
+	}
 }
 
 func AdaptAuthorizeError(permissionDeniedError *serviceerror.PermissionDenied) error {

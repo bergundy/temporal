@@ -11,11 +11,13 @@ import (
 	"github.com/stretchr/testify/require"
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
+	errordetailspb "go.temporal.io/api/errordetails/v1"
 	failurepb "go.temporal.io/api/failure/v1"
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/server/common/nexus/nexusrpc"
 	"go.temporal.io/server/common/testing/protorequire"
+	"google.golang.org/grpc/codes"
 )
 
 func TestCoerceToCanceledFailure(t *testing.T) {
@@ -461,5 +463,68 @@ func TestCallerRPSLimitErrorIgnoresOtherErrors(t *testing.T) {
 			t.Parallel()
 			require.NoError(t, CallerRPSLimitError(tc.err))
 		})
+	}
+}
+
+func TestHandlerErrorToServiceError(t *testing.T) {
+	t.Parallel()
+
+	handlerErr := &nexus.HandlerError{
+		Type:          nexus.HandlerErrorTypeUnavailable,
+		Message:       "try again later",
+		RetryBehavior: nexus.HandlerErrorRetryBehaviorNonRetryable,
+	}
+	err := HandlerErrorToServiceError(handlerErr)
+
+	var unavailable *serviceerror.Unavailable
+	require.ErrorAs(t, err, &unavailable)
+	var handlerFailure *errordetailspb.NexusHandlerFailure
+	for _, detail := range serviceerror.ToStatus(err).Details() {
+		if d, ok := detail.(*errordetailspb.NexusHandlerFailure); ok {
+			handlerFailure = d
+		}
+	}
+	require.NotNil(t, handlerFailure)
+	require.Equal(t, "try again later", handlerFailure.GetFailure().GetMessage())
+	protorequire.ProtoEqual(t, &failurepb.NexusHandlerFailureInfo{
+		Type:          string(nexus.HandlerErrorTypeUnavailable),
+		RetryBehavior: enumspb.NEXUS_HANDLER_ERROR_RETRY_BEHAVIOR_NON_RETRYABLE,
+	}, handlerFailure.GetFailure().GetNexusHandlerFailureInfo())
+
+	converted, ok := HandlerErrorFromServiceError(err)
+	require.True(t, ok)
+	require.Equal(t, nexus.HandlerErrorTypeUnavailable, converted.Type)
+	require.Equal(t, "try again later", converted.Message)
+	require.Equal(t, nexus.HandlerErrorRetryBehaviorNonRetryable, converted.RetryBehavior)
+
+	_, ok = HandlerErrorFromServiceError(serviceerror.NewUnavailable("unavailable"))
+	require.False(t, ok)
+}
+
+func TestHandlerErrorToServiceError_Codes(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		handlerErrorType nexus.HandlerErrorType
+		expected         codes.Code
+	}{
+		{nexus.HandlerErrorTypeBadRequest, codes.InvalidArgument},
+		{nexus.HandlerErrorTypeUnauthenticated, codes.Unauthenticated},
+		{nexus.HandlerErrorTypeUnauthorized, codes.PermissionDenied},
+		{nexus.HandlerErrorTypeNotFound, codes.NotFound},
+		{nexus.HandlerErrorTypeConflict, codes.AlreadyExists},
+		{nexus.HandlerErrorTypeResourceExhausted, codes.ResourceExhausted},
+		{nexus.HandlerErrorTypeInternal, codes.Internal},
+		{nexus.HandlerErrorTypeNotImplemented, codes.Unimplemented},
+		{nexus.HandlerErrorTypeUnavailable, codes.Unavailable},
+		{nexus.HandlerErrorTypeRequestTimeout, codes.DeadlineExceeded},
+		{nexus.HandlerErrorTypeUpstreamTimeout, codes.DeadlineExceeded},
+		{"UNKNOWN_TYPE", codes.Internal},
+	} {
+		err := HandlerErrorToServiceError(nexus.NewHandlerErrorf(tc.handlerErrorType, "error"))
+		require.Equal(t, tc.expected, serviceerror.ToStatus(err).Code(), tc.handlerErrorType)
+		converted, ok := HandlerErrorFromServiceError(err)
+		require.True(t, ok, tc.handlerErrorType)
+		require.Equal(t, tc.handlerErrorType, converted.Type)
 	}
 }
