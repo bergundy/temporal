@@ -3,9 +3,9 @@ package chasm
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"reflect"
 	"regexp"
-	"slices"
 	"strings"
 
 	"github.com/nexus-rpc/sdk-go/nexus"
@@ -36,7 +36,7 @@ type (
 		rtByID     map[uint32]*RegistrableTask       // task type ID -> task
 		rtByGoType map[reflect.Type]*RegistrableTask // task go type -> task
 
-		nexusServices          map[string][]*nexus.Service // service name -> nexus services, one per library that implements operations of the service
+		nexusServices          map[string]*nexus.Service // service name -> nexus service
 		NexusEndpointProcessor *NexusEndpointProcessor
 
 		// IDs of component types that own a task type opted into the task count metrics.
@@ -66,7 +66,7 @@ func NewRegistry(logger log.Logger) *Registry {
 		rtByGoType:                  make(map[reflect.Type]*RegistrableTask),
 		taskCountMetricComponentIDs: make(map[uint32]struct{}),
 		rcContextValues:             make(map[any]valueWithFqn),
-		nexusServices:               make(map[string][]*nexus.Service),
+		nexusServices:               make(map[string]*nexus.Service),
 		NexusEndpointProcessor:      NewNexusEndpointProcessor(),
 		logger:                      logger,
 	}
@@ -426,24 +426,19 @@ func (r *Registry) warnUnmanagedFields(fqn string, rc *RegistrableComponent) {
 	}
 }
 
-// registerNexusService registers a Nexus service implemented by a library. Multiple libraries may implement different
-// operations of the same service, e.g. WorkflowService operations for workflows and for activities.
 func (r *Registry) registerNexusService(svc *nexus.Service) error {
-	if slices.Contains(r.nexusServices[svc.Name], svc) {
+	if _, ok := r.nexusServices[svc.Name]; ok {
 		return fmt.Errorf("nexus service %s is already registered", svc.Name)
 	}
-	r.nexusServices[svc.Name] = append(r.nexusServices[svc.Name], svc)
+	r.nexusServices[svc.Name] = svc
 	return nil
 }
 
-// NexusServices returns all registered Nexus services by name. A service name maps to multiple services when
-// multiple libraries implement its operations.
-func (r *Registry) NexusServices() map[string][]*nexus.Service {
+// NexusServices returns all registered Nexus services.
+func (r *Registry) NexusServices() map[string]*nexus.Service {
 	// Return a copy to prevent external modification
-	services := make(map[string][]*nexus.Service, len(r.nexusServices))
-	for name, svcs := range r.nexusServices {
-		services[name] = slices.Clone(svcs)
-	}
+	services := make(map[string]*nexus.Service, len(r.nexusServices))
+	maps.Copy(services, r.nexusServices)
 	return services
 }
 

@@ -581,27 +581,8 @@ func (s *RegistryTestSuite) TestRegistry_RegisterNexusServices_Success() {
 	s.Require().Len(services, 2)
 	s.Require().Contains(services, "Service1")
 	s.Require().Contains(services, "Service2")
-	s.Require().Equal([]*nexus.Service{svc1}, services["Service1"])
-	s.Require().Equal([]*nexus.Service{svc2}, services["Service2"])
-}
-
-func (s *RegistryTestSuite) TestRegistry_RegisterNexusServices_SharedAcrossLibraries() {
-	r := chasm.NewRegistry(s.logger)
-	ctrl := gomock.NewController(s.T())
-	var services []*nexus.Service
-	for _, name := range []string{"TestLibrary1", "TestLibrary2"} {
-		lib := chasm.NewMockLibrary(ctrl)
-		lib.EXPECT().Name().Return(name).AnyTimes()
-		lib.EXPECT().Components().Return(nil)
-		lib.EXPECT().Tasks().Return(nil)
-		lib.EXPECT().NexusServiceProcessors().Return(nil)
-		svc := nexus.NewService("Service")
-		lib.EXPECT().NexusServices().Return([]*nexus.Service{svc})
-		services = append(services, svc)
-		s.Require().NoError(r.Register(lib))
-	}
-
-	s.Require().Equal(map[string][]*nexus.Service{"Service": services}, r.NexusServices())
+	s.Require().Equal(svc1, services["Service1"])
+	s.Require().Equal(svc2, services["Service2"])
 }
 
 func (s *RegistryTestSuite) TestRegistry_RegisterNexusServices_Error() {
