@@ -6,22 +6,30 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/nexus-rpc/sdk-go/nexus"
+	"go.temporal.io/api/activityservice/v1"
+	commandpb "go.temporal.io/api/command/v1"
 	commonpb "go.temporal.io/api/common/v1"
+	enumspb "go.temporal.io/api/enums/v1"
 	errordetailspb "go.temporal.io/api/errordetails/v1"
+	historypb "go.temporal.io/api/history/v1"
 	"go.temporal.io/api/serviceerror"
+	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/api/workflowservice/v1/workflowservicenexus"
+	"go.temporal.io/sdk/client"
 	"go.temporal.io/server/chasm/lib/activity"
 	"go.temporal.io/server/chasm/lib/callback"
 	"go.temporal.io/server/common/dynamicconfig"
 	commonnexus "go.temporal.io/server/common/nexus"
+	"go.temporal.io/server/common/payloads"
 	sdkconverter "go.temporal.io/server/common/sdk"
 	"go.temporal.io/server/common/testing/parallelsuite"
 	"go.temporal.io/server/common/testing/protorequire"
 	"go.temporal.io/server/tests/testcore"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
+
+var activityServiceNexus = workflowservicenexus.TemporalAPIActivityserviceV1ActivityService
 
 type directNexusCallTestSuite struct {
 	parallelsuite.Suite[*directNexusCallTestSuite]
@@ -63,8 +71,8 @@ func (s *directNexusCallTestSuite) cancelRequest(
 	return &workflowservice.CancelNexusOperationRequest{
 		Namespace:      env.Namespace().String(),
 		Endpoint:       commonnexus.SystemEndpoint,
-		Service:        workflowservicenexus.TemporalAPIWorkflowserviceV1WorkflowService.ServiceName,
-		Operation:      workflowservicenexus.TemporalAPIWorkflowserviceV1WorkflowService.PollActivityExecution.Name(),
+		Service:        activityServiceNexus.ServiceName,
+		Operation:      activityServiceNexus.GetResult.Name(),
 		OperationToken: token,
 	}
 }
@@ -81,13 +89,13 @@ func (s *directNexusCallTestSuite) requireHandlerFailure(err error, handlerError
 	s.Fail("expected a NexusHandlerFailure detail", "error: %v", err)
 }
 
-func (s *directNexusCallTestSuite) pollActivityExecutionRequest(
+func (s *directNexusCallTestSuite) getResultRequest(
 	env *standaloneActivityEnv,
 	activityID string,
 	requestID string,
 	ephemeral bool,
 ) *workflowservice.StartNexusOperationRequest {
-	input, err := sdkconverter.PreferProtoDataConverter.ToPayload(&workflowservice.PollActivityExecutionRequest{
+	input, err := sdkconverter.PreferProtoDataConverter.ToPayload(&activityservice.GetResultRequest{
 		ActivityId: activityID,
 	})
 	s.NoError(err)
@@ -95,8 +103,8 @@ func (s *directNexusCallTestSuite) pollActivityExecutionRequest(
 		Namespace: env.Namespace().String(),
 		RequestId: requestID,
 		Endpoint:  commonnexus.SystemEndpoint,
-		Service:   workflowservicenexus.TemporalAPIWorkflowserviceV1WorkflowService.ServiceName,
-		Operation: workflowservicenexus.TemporalAPIWorkflowserviceV1WorkflowService.PollActivityExecution.Name(),
+		Service:   activityServiceNexus.ServiceName,
+		Operation: activityServiceNexus.GetResult.Name(),
 		Input:     input,
 	}
 	if ephemeral {
@@ -107,17 +115,32 @@ func (s *directNexusCallTestSuite) pollActivityExecutionRequest(
 	return request
 }
 
-func (s *directNexusCallTestSuite) requireCompleted(
-	resp *workflowservice.StartNexusOperationResponse,
+// requireActivityLink asserts that links contain a link to the activity run.
+func (s *directNexusCallTestSuite) requireActivityLink(
+	env *standaloneActivityEnv,
+	links []*commonpb.Link,
+	activityID string,
 	runID string,
 ) {
-	payload := resp.GetSyncSuccess().GetPayload()
-	s.Require().NotNil(payload, "expected a sync response, got %v", resp)
-	s.Equal("true", string(payload.GetMetadata()[commonnexus.SystemPayloadMetadataKey]))
-	var pollResponse workflowservice.PollActivityExecutionResponse
-	s.Require().NoError(proto.Unmarshal(payload.GetData(), &pollResponse))
-	s.Equal(runID, pollResponse.GetRunId())
-	protorequire.ProtoEqual(s.T(), defaultResult, pollResponse.GetOutcome().GetResult())
+	protorequire.ProtoSliceEqual(s.T(), []*commonpb.Link{{
+		Variant: &commonpb.Link_Activity_{Activity: &commonpb.Link_Activity{
+			Namespace:  env.Namespace().String(),
+			ActivityId: activityID,
+			RunId:      runID,
+		}},
+	}}, links)
+}
+
+// requireCompleted asserts that the operation completed with the activity's result, as is.
+func (s *directNexusCallTestSuite) requireCompleted(
+	env *standaloneActivityEnv,
+	resp *workflowservice.StartNexusOperationResponse,
+	activityID string,
+	runID string,
+) {
+	s.Require().NotNil(resp.GetSyncSuccess(), "expected a sync response, got %v", resp)
+	protorequire.ProtoEqual(s.T(), defaultResult.GetPayloads()[0], resp.GetSyncSuccess().GetPayload())
+	s.requireActivityLink(env, resp.GetSyncSuccess().GetLinks(), activityID, runID)
 }
 
 func (s *directNexusCallTestSuite) completeActivity(env *standaloneActivityEnv, activityID, taskQueue, runID string) {
@@ -130,7 +153,7 @@ func (s *directNexusCallTestSuite) completeActivity(env *standaloneActivityEnv, 
 	s.NoError(err)
 }
 
-func (s *directNexusCallTestSuite) TestPollActivityExecution_CompletesWhileWaiting() {
+func (s *directNexusCallTestSuite) TestGetResult_CompletesWhileWaiting() {
 	env := s.newTestEnv()
 	activityID := testcore.RandomizeStr(s.T().Name())
 	taskQueue := testcore.RandomizeStr(s.T().Name())
@@ -144,7 +167,7 @@ func (s *directNexusCallTestSuite) TestPollActivityExecution_CompletesWhileWaiti
 	go func() {
 		resp, err := env.FrontendClient().StartNexusOperation(
 			s.Context(),
-			s.pollActivityExecutionRequest(env, activityID, uuid.NewString(), true),
+			s.getResultRequest(env, activityID, uuid.NewString(), true),
 		)
 		resultCh <- result{resp, err}
 	}()
@@ -158,10 +181,10 @@ func (s *directNexusCallTestSuite) TestPollActivityExecution_CompletesWhileWaiti
 	s.completeActivity(env, activityID, taskQueue, startResp.RunId)
 	r := <-resultCh
 	s.Require().NoError(r.err)
-	s.requireCompleted(r.resp, startResp.RunId)
+	s.requireCompleted(env, r.resp, activityID, startResp.RunId)
 }
 
-func (s *directNexusCallTestSuite) TestPollActivityExecution_AlreadyCompleted() {
+func (s *directNexusCallTestSuite) TestGetResult_AlreadyCompleted() {
 	env := s.newTestEnv()
 	activityID := testcore.RandomizeStr(s.T().Name())
 	taskQueue := testcore.RandomizeStr(s.T().Name())
@@ -171,14 +194,14 @@ func (s *directNexusCallTestSuite) TestPollActivityExecution_AlreadyCompleted() 
 
 	resp, err := env.FrontendClient().StartNexusOperation(
 		s.Context(),
-		s.pollActivityExecutionRequest(env, activityID, uuid.NewString(), true),
+		s.getResultRequest(env, activityID, uuid.NewString(), true),
 	)
 	s.Require().NoError(err)
-	s.requireCompleted(resp, startResp.RunId)
-	s.Equal(transitions, s.stateTransitionCount(env, activityID), "polling a closed activity shouldn't write it")
+	s.requireCompleted(env, resp, activityID, startResp.RunId)
+	s.Equal(transitions, s.stateTransitionCount(env, activityID), "getting a closed activity's result shouldn't write it")
 }
 
-func (s *directNexusCallTestSuite) TestPollActivityExecution_LongPollTimeout() {
+func (s *directNexusCallTestSuite) TestGetResult_LongPollTimeout() {
 	env := s.newTestEnv()
 	env.GetTestCluster().OverrideDynamicConfig(s.T(), callback.EphemeralLongPollTimeout, []dynamicconfig.ConstrainedValue{{
 		Constraints: dynamicconfig.Constraints{Namespace: env.Namespace().String()},
@@ -187,7 +210,7 @@ func (s *directNexusCallTestSuite) TestPollActivityExecution_LongPollTimeout() {
 	activityID := testcore.RandomizeStr(s.T().Name())
 	taskQueue := testcore.RandomizeStr(s.T().Name())
 	startResp := env.startAndValidateActivity(s.Context(), s.T(), activityID, taskQueue)
-	request := s.pollActivityExecutionRequest(env, activityID, uuid.NewString(), true)
+	request := s.getResultRequest(env, activityID, uuid.NewString(), true)
 	transitions := s.stateTransitionCount(env, activityID)
 
 	// The operation is still running when the long poll times out.
@@ -201,21 +224,108 @@ func (s *directNexusCallTestSuite) TestPollActivityExecution_LongPollTimeout() {
 	s.completeActivity(env, activityID, taskQueue, startResp.RunId)
 	resp, err = env.FrontendClient().StartNexusOperation(s.Context(), request)
 	s.Require().NoError(err)
-	s.requireCompleted(resp, startResp.RunId)
+	s.requireCompleted(env, resp, activityID, startResp.RunId)
 }
 
-func (s *directNexusCallTestSuite) TestPollActivityExecution_WithoutCallbackReturnsAsync() {
+func (s *directNexusCallTestSuite) TestGetResult_WithoutCallbackReturnsAsync() {
 	env := s.newTestEnv()
 	activityID := testcore.RandomizeStr(s.T().Name())
 	taskQueue := testcore.RandomizeStr(s.T().Name())
-	env.startAndValidateActivity(s.Context(), s.T(), activityID, taskQueue)
+	startResp := env.startAndValidateActivity(s.Context(), s.T(), activityID, taskQueue)
 
 	resp, err := env.FrontendClient().StartNexusOperation(
 		s.Context(),
-		s.pollActivityExecutionRequest(env, activityID, uuid.NewString(), false),
+		s.getResultRequest(env, activityID, uuid.NewString(), false),
 	)
 	s.Require().NoError(err)
-	s.NotNil(resp.GetAsyncSuccess(), "expected an async response, got %v", resp)
+	s.Require().NotNil(resp.GetAsyncSuccess(), "expected an async response, got %v", resp)
+	s.requireActivityLink(env, resp.GetAsyncSuccess().GetLinks(), activityID, startResp.RunId)
+}
+
+func (s *directNexusCallTestSuite) TestGetResult_ActivityFailed() {
+	env := s.newTestEnv()
+	activityID := testcore.RandomizeStr(s.T().Name())
+	taskQueue := testcore.RandomizeStr(s.T().Name())
+	startResp := env.startAndValidateActivity(s.Context(), s.T(), activityID, taskQueue)
+	task := env.pollActivityTaskAndValidate(s.Context(), s.T(), activityID, taskQueue, startResp.RunId)
+	_, err := env.FrontendClient().RespondActivityTaskFailed(s.Context(), &workflowservice.RespondActivityTaskFailedRequest{
+		Namespace: env.Namespace().String(),
+		TaskToken: task.TaskToken,
+		Failure:   defaultFailure,
+	})
+	s.Require().NoError(err)
+
+	resp, err := env.FrontendClient().StartNexusOperation(
+		s.Context(),
+		s.getResultRequest(env, activityID, uuid.NewString(), true),
+	)
+	s.Require().NoError(err)
+	s.Require().NotNil(resp.GetFailure(), "expected a failure response, got %v", resp)
+	s.Equal(defaultFailure.GetMessage(), resp.GetFailure().GetCause().GetMessage(), "failure: %v", resp.GetFailure())
+}
+
+// TestGetResult_FromWorkflow verifies that a workflow can call the operation. Its durable callback delivers the
+// activity's completion, which is the operation's outcome.
+func (s *directNexusCallTestSuite) TestGetResult_FromWorkflow() {
+	env := s.newTestEnv()
+	activityID := testcore.RandomizeStr(s.T().Name())
+	taskQueue := testcore.RandomizeStr(s.T().Name())
+	startResp := env.startAndValidateActivity(s.Context(), s.T(), activityID, taskQueue)
+
+	callerTaskQueue := testcore.RandomizeStr(s.T().Name() + "-caller")
+	_, err := env.SdkClient().ExecuteWorkflow(s.Context(), client.StartWorkflowOptions{
+		TaskQueue: callerTaskQueue,
+	}, "caller-workflow")
+	s.Require().NoError(err)
+	pollWorkflowTask := func() *workflowservice.PollWorkflowTaskQueueResponse {
+		resp, err := env.FrontendClient().PollWorkflowTaskQueue(s.Context(), &workflowservice.PollWorkflowTaskQueueRequest{
+			Namespace: env.Namespace().String(),
+			TaskQueue: &taskqueuepb.TaskQueue{Name: callerTaskQueue, Kind: enumspb.TASK_QUEUE_KIND_NORMAL},
+			Identity:  "test",
+		})
+		s.Require().NoError(err)
+		s.Require().NotEmpty(resp.GetTaskToken())
+		return resp
+	}
+	respondWorkflowTask := func(task *workflowservice.PollWorkflowTaskQueueResponse, commands ...*commandpb.Command) {
+		_, err := env.FrontendClient().RespondWorkflowTaskCompleted(s.Context(), &workflowservice.RespondWorkflowTaskCompletedRequest{
+			Identity:  "test",
+			TaskToken: task.GetTaskToken(),
+			Commands:  commands,
+		})
+		s.Require().NoError(err)
+	}
+	findEvent := func(task *workflowservice.PollWorkflowTaskQueueResponse, eventType enumspb.EventType) *historypb.HistoryEvent {
+		for _, event := range task.GetHistory().GetEvents() {
+			if event.GetEventType() == eventType {
+				return event
+			}
+		}
+		return nil
+	}
+
+	respondWorkflowTask(pollWorkflowTask(), &commandpb.Command{
+		CommandType: enumspb.COMMAND_TYPE_SCHEDULE_NEXUS_OPERATION,
+		Attributes: &commandpb.Command_ScheduleNexusOperationCommandAttributes{
+			ScheduleNexusOperationCommandAttributes: &commandpb.ScheduleNexusOperationCommandAttributes{
+				Endpoint:  commonnexus.SystemEndpoint,
+				Service:   activityServiceNexus.ServiceName,
+				Operation: activityServiceNexus.GetResult.Name(),
+				Input:     payloads.MustEncodeSingle(&activityservice.GetResultRequest{ActivityId: activityID}),
+			},
+		},
+	})
+
+	// The operation starts asynchronously because the activity is still running.
+	task := pollWorkflowTask()
+	s.Require().NotNil(findEvent(task, enumspb.EVENT_TYPE_NEXUS_OPERATION_STARTED), "history: %v", task.GetHistory())
+	respondWorkflowTask(task)
+
+	s.completeActivity(env, activityID, taskQueue, startResp.RunId)
+	task = pollWorkflowTask()
+	completed := findEvent(task, enumspb.EVENT_TYPE_NEXUS_OPERATION_COMPLETED)
+	s.Require().NotNil(completed, "history: %v", task.GetHistory())
+	protorequire.ProtoEqual(s.T(), defaultResult.GetPayloads()[0], completed.GetNexusOperationCompletedEventAttributes().GetResult())
 }
 
 func (s *directNexusCallTestSuite) TestCancelNexusOperation() {
@@ -226,7 +336,7 @@ func (s *directNexusCallTestSuite) TestCancelNexusOperation() {
 
 	resp, err := env.FrontendClient().StartNexusOperation(
 		s.Context(),
-		s.pollActivityExecutionRequest(env, activityID, uuid.NewString(), false),
+		s.getResultRequest(env, activityID, uuid.NewString(), false),
 	)
 	s.Require().NoError(err)
 	token := resp.GetAsyncSuccess().GetOperationToken()
@@ -256,11 +366,11 @@ func (s *directNexusCallTestSuite) TestValidation() {
 	env := s.newTestEnv()
 	activityID := testcore.RandomizeStr(s.T().Name())
 
-	s.RunSequential("NamespaceInInput", func(s *directNexusCallTestSuite) {
-		request := s.pollActivityExecutionRequest(env, activityID, uuid.NewString(), true)
-		input, err := sdkconverter.PreferProtoDataConverter.ToPayload(&workflowservice.PollActivityExecutionRequest{
-			Namespace:  env.Namespace().String(),
+	s.RunSequential("InvalidRunID", func(s *directNexusCallTestSuite) {
+		request := s.getResultRequest(env, activityID, uuid.NewString(), true)
+		input, err := sdkconverter.PreferProtoDataConverter.ToPayload(&activityservice.GetResultRequest{
 			ActivityId: activityID,
+			RunId:      "not-a-uuid",
 		})
 		s.NoError(err)
 		request.Input = input
@@ -270,7 +380,7 @@ func (s *directNexusCallTestSuite) TestValidation() {
 	})
 
 	s.RunSequential("NonSystemEndpoint", func(s *directNexusCallTestSuite) {
-		request := s.pollActivityExecutionRequest(env, activityID, uuid.NewString(), true)
+		request := s.getResultRequest(env, activityID, uuid.NewString(), true)
 		request.Endpoint = "some-endpoint"
 		_, err := env.FrontendClient().StartNexusOperation(s.Context(), request)
 		var unimplemented *serviceerror.Unimplemented
@@ -278,7 +388,7 @@ func (s *directNexusCallTestSuite) TestValidation() {
 	})
 
 	s.RunSequential("UnknownOperation", func(s *directNexusCallTestSuite) {
-		request := s.pollActivityExecutionRequest(env, activityID, uuid.NewString(), true)
+		request := s.getResultRequest(env, activityID, uuid.NewString(), true)
 		request.Operation = "Unknown"
 		_, err := env.FrontendClient().StartNexusOperation(s.Context(), request)
 		var notFound *serviceerror.NotFound
@@ -293,7 +403,7 @@ func (s *directNexusCallTestSuite) TestValidation() {
 		}})
 		_, err := env.FrontendClient().StartNexusOperation(
 			s.Context(),
-			s.pollActivityExecutionRequest(env, activityID, uuid.NewString(), true),
+			s.getResultRequest(env, activityID, uuid.NewString(), true),
 		)
 		var unimplemented *serviceerror.Unimplemented
 		s.ErrorAs(err, &unimplemented)

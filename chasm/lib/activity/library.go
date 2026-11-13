@@ -79,7 +79,7 @@ func (l *componentOnlyLibrary) NexusServiceProcessors() []*chasm.NexusServicePro
 	if l.config == nil {
 		return nil
 	}
-	return []*chasm.NexusServiceProcessor{newWorkflowServiceNexusServiceProcessor(l.config)}
+	return []*chasm.NexusServiceProcessor{newActivityServiceNexusServiceProcessor(l.config)}
 }
 
 // NewNilLibrary creates a Library with all nil handlers. Useful for
@@ -128,7 +128,7 @@ func (l *library) NexusServices() []*nexus.Service {
 	if l.handler == nil {
 		return nil
 	}
-	return []*nexus.Service{newWorkflowServiceNexusService(l.handler)}
+	return []*nexus.Service{newActivityServiceNexusService(l.handler)}
 }
 
 func (l *library) RegisterServices(server *grpc.Server) {

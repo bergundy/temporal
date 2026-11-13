@@ -4,67 +4,73 @@ import (
 	"context"
 
 	"github.com/nexus-rpc/sdk-go/nexus"
+	"go.temporal.io/api/activityservice/v1"
 	commonpb "go.temporal.io/api/common/v1"
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/api/workflowservice/v1/workflowservicenexus"
 	"go.temporal.io/server/chasm"
 	"go.temporal.io/server/chasm/lib/callback"
-	"go.temporal.io/server/common/namespace"
 	commonnexus "go.temporal.io/server/common/nexus"
+	"go.temporal.io/server/common/nexus/nexusrpc"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// pollActivityExecutionOperation implements the PollActivityExecution system Nexus operation. It completes
-// synchronously with the activity's outcome if the activity is closed. Otherwise it attaches the request's callback to
-// the activity and completes asynchronously.
-type pollActivityExecutionOperation struct {
-	nexus.UnimplementedOperation[*workflowservice.PollActivityExecutionRequest, *workflowservice.PollActivityExecutionResponse]
+var activityServiceNexus = workflowservicenexus.TemporalAPIActivityserviceV1ActivityService
+
+// getResultOperation implements the ActivityService GetResult system Nexus operation. Its outcome is the activity's
+// Nexus completion, i.e. what the activity's completion callbacks deliver. It completes synchronously if the activity
+// is closed. Otherwise it attaches the request's callback to the activity and completes asynchronously, via that
+// callback.
+type getResultOperation struct {
+	nexus.UnimplementedOperation[*activityservice.GetResultRequest, *commonpb.Payload]
 
 	handler *handler
 }
 
-// pollActivityExecutionTokenData is the operation-specific part of the token of an asynchronous PollActivityExecution
-// operation, whose business ID is the activity ID.
-type pollActivityExecutionTokenData struct {
+// getResultTokenData is the operation-specific part of the token of an asynchronous GetResult operation, whose
+// business ID is the activity ID.
+type getResultTokenData struct {
 	RunID string `json:"rid"`
 }
 
-func (o *pollActivityExecutionOperation) Name() string {
-	return workflowservicenexus.TemporalAPIWorkflowserviceV1WorkflowService.PollActivityExecution.Name()
+func (o *getResultOperation) Name() string {
+	return activityServiceNexus.GetResult.Name()
 }
 
-func (o *pollActivityExecutionOperation) Start(
+func (o *getResultOperation) Start(
 	ctx context.Context,
-	req *workflowservice.PollActivityExecutionRequest,
+	req *activityservice.GetResultRequest,
 	options nexus.StartOperationOptions,
-) (nexus.HandlerStartOperationResult[*workflowservice.PollActivityExecutionResponse], error) {
-	// A durable callback would deliver the activity's own completion rather than a PollActivityExecutionResponse.
-	if options.CallbackURL != "" && options.CallbackURL != commonnexus.EphemeralCallbackURL {
-		return nil, serviceerror.NewUnimplemented("PollActivityExecution only supports ephemeral callbacks")
-	}
-	namespaceID, err := o.handler.namespaceRegistry.GetNamespaceID(namespace.Name(req.GetNamespace()))
-	if err != nil {
-		return nil, err
+) (nexus.HandlerStartOperationResult[*commonpb.Payload], error) {
+	ns, ok := chasm.NexusOperationNamespace(ctx)
+	if !ok {
+		return nil, serviceerror.NewInternal("system Nexus operation namespace not set")
 	}
 	ref := chasm.NewComponentRef[*Activity](chasm.ExecutionKey{
-		NamespaceID: namespaceID.String(),
+		NamespaceID: ns.ID().String(),
 		BusinessID:  req.GetActivityId(),
 		RunID:       req.GetRunId(),
 	})
 
 	type result struct {
-		response *workflowservice.PollActivityExecutionResponse
-		runID    string
+		// completion is set if the activity is closed.
+		completion *nexusrpc.CompleteOperationOptions
+		runID      string
 	}
-	// Neither path makes a durable change, so the update isn't persisted.
+	// Unless a durable callback is attached, the update makes no durable change and isn't persisted.
 	res, _, err := chasm.UpdateComponent(ctx, ref, func(
 		a *Activity,
 		ctx chasm.MutableContext,
 		_ struct{},
 	) (result, error) {
+		res := result{runID: ctx.ExecutionKey().RunID}
 		if a.LifecycleState(ctx).IsClosed() {
-			return result{response: a.buildPollActivityExecutionResponse(ctx).GetFrontendResponse()}, nil
+			completion, err := a.GetNexusCompletion(ctx, options.RequestID)
+			if err != nil {
+				return result{}, err
+			}
+			res.completion = &completion
+			return res, nil
 		}
 		if options.CallbackURL != "" {
 			cb := &commonpb.Callback{
@@ -78,25 +84,37 @@ func (o *pollActivityExecutionOperation) Start(
 				options.RequestID,
 				timestamppb.New(ctx.Now(a)),
 				[]*commonpb.Callback{cb},
-				req.GetNamespace(),
+				ns.Name().String(),
 				o.handler.callbackValidator,
 			)
 			if err != nil {
 				return result{}, err
 			}
 		}
-		return result{runID: ctx.ExecutionKey().RunID}, nil
+		return res, nil
 	}, struct{}{})
 	if err != nil {
 		return nil, err
 	}
-	if res.response != nil {
-		return &nexus.HandlerStartOperationResultSync[*workflowservice.PollActivityExecutionResponse]{Value: res.response}, nil
+	nexus.AddHandlerLinks(ctx, commonnexus.ConvertLinkActivityToNexusLink(&commonpb.Link_Activity{
+		Namespace:  ns.Name().String(),
+		ActivityId: req.GetActivityId(),
+		RunId:      res.runID,
+	}))
+	if c := res.completion; c != nil {
+		if c.Error != nil {
+			return nil, c.Error
+		}
+		payload, ok := c.Result.(*commonpb.Payload)
+		if !ok {
+			return nil, serviceerror.NewInternalf("unexpected activity result type: %T", c.Result)
+		}
+		return &nexus.HandlerStartOperationResultSync[*commonpb.Payload]{Value: payload}, nil
 	}
 
-	token, err := chasm.NexusOperationToken[pollActivityExecutionTokenData]{
+	token, err := chasm.NexusOperationToken[getResultTokenData]{
 		BusinessID: req.GetActivityId(),
-		Data:       pollActivityExecutionTokenData{RunID: res.runID},
+		Data:       getResultTokenData{RunID: res.runID},
 	}.Encode()
 	if err != nil {
 		return nil, serviceerror.NewInternal(err.Error())
@@ -104,23 +122,22 @@ func (o *pollActivityExecutionOperation) Start(
 	return &nexus.HandlerStartOperationResultAsync{OperationToken: token}, nil
 }
 
-// Cancel is a no-op: waiting for an activity's outcome doesn't affect the activity.
-func (o *pollActivityExecutionOperation) Cancel(_ context.Context, token string, _ nexus.CancelOperationOptions) error {
-	if _, err := chasm.DecodeNexusOperationToken[pollActivityExecutionTokenData](token); err != nil {
+// Cancel is a no-op: waiting for an activity's result doesn't affect the activity.
+func (o *getResultOperation) Cancel(_ context.Context, token string, _ nexus.CancelOperationOptions) error {
+	if _, err := chasm.DecodeNexusOperationToken[getResultTokenData](token); err != nil {
 		return nexus.NewHandlerErrorf(nexus.HandlerErrorTypeBadRequest, "invalid operation token: %v", err)
 	}
 	return nil
 }
 
-// pollActivityExecutionProcessor validates PollActivityExecution operation inputs and routes them to the activity's
-// shard.
-type pollActivityExecutionProcessor struct {
+// getResultProcessor validates GetResult operation inputs and routes them to the activity's shard.
+type getResultProcessor struct {
 	config *Config
 }
 
-func (p pollActivityExecutionProcessor) ProcessInput(
+func (p getResultProcessor) ProcessInput(
 	ctx chasm.NexusOperationProcessorContext,
-	req *workflowservice.PollActivityExecutionRequest,
+	req *activityservice.GetResultRequest,
 ) (*chasm.NexusOperationProcessorResult, error) {
 	if req == nil {
 		return nil, serviceerror.NewInvalidArgument("Request is empty")
@@ -128,11 +145,7 @@ func (p pollActivityExecutionProcessor) ProcessInput(
 	if !p.config.Enabled(ctx.Namespace.Name().String()) {
 		return nil, ErrStandaloneActivityDisabled
 	}
-	if req.GetNamespace() != "" {
-		return nil, serviceerror.NewInvalidArgument("Namespace should not be set on the request")
-	}
-	req.Namespace = ctx.Namespace.Name().String()
-	if err := validateAndNormalizePollActivityExecutionRequest(req, p.config.MaxIDLengthLimit()); err != nil {
+	if err := validateGetResultRequest(req, p.config.MaxIDLengthLimit()); err != nil {
 		return nil, err
 	}
 	return &chasm.NexusOperationProcessorResult{
@@ -143,17 +156,17 @@ func (p pollActivityExecutionProcessor) ProcessInput(
 	}, nil
 }
 
-func newWorkflowServiceNexusService(h *handler) *nexus.Service {
-	svc := nexus.NewService(workflowservicenexus.TemporalAPIWorkflowserviceV1WorkflowService.ServiceName)
-	svc.MustRegister(&pollActivityExecutionOperation{handler: h})
+func newActivityServiceNexusService(h *handler) *nexus.Service {
+	svc := nexus.NewService(activityServiceNexus.ServiceName)
+	svc.MustRegister(&getResultOperation{handler: h})
 	return svc
 }
 
-func newWorkflowServiceNexusServiceProcessor(config *Config) *chasm.NexusServiceProcessor {
-	sp := chasm.NewNexusServiceProcessor(workflowservicenexus.TemporalAPIWorkflowserviceV1WorkflowService.ServiceName)
+func newActivityServiceNexusServiceProcessor(config *Config) *chasm.NexusServiceProcessor {
+	sp := chasm.NewNexusServiceProcessor(activityServiceNexus.ServiceName)
 	sp.MustRegisterOperation(
-		workflowservicenexus.TemporalAPIWorkflowserviceV1WorkflowService.PollActivityExecution.Name(),
-		chasm.NewRegisterableNexusOperationProcessor(pollActivityExecutionProcessor{config: config}),
+		activityServiceNexus.GetResult.Name(),
+		chasm.NewRegisterableNexusOperationProcessor(getResultProcessor{config: config}),
 	)
 	return sp
 }

@@ -2566,8 +2566,13 @@ func (h *Handler) StartNexusOperation(
 	if h.nexusHandler == nil {
 		return nil, serviceerror.NewUnimplemented("no nexus services registered")
 	}
+	nsEntry, err := h.namespaceRegistry.GetNamespaceByID(namespace.ID(req.GetNamespaceId()))
+	if err != nil {
+		return nil, err
+	}
+	ctx = chasm.WithNexusOperationNamespace(ctx, nsEntry)
 	if req.GetRequest().GetCallback() == commonnexus.EphemeralCallbackURL {
-		return h.startNexusOperationWithEphemeralCallback(ctx, req)
+		return h.startNexusOperationWithEphemeralCallback(ctx, nsEntry, req)
 	}
 	return h.startNexusOperation(ctx, req)
 }
@@ -2578,12 +2583,9 @@ func (h *Handler) StartNexusOperation(
 // synchronously. If the long-poll deadline is reached first, the operation's async start is returned.
 func (h *Handler) startNexusOperationWithEphemeralCallback(
 	ctx context.Context,
+	nsEntry *namespace.Namespace,
 	req *historyservice.StartNexusOperationRequest,
 ) (*historyservice.StartNexusOperationResponse, error) {
-	nsEntry, err := h.namespaceRegistry.GetNamespaceByID(namespace.ID(req.GetNamespaceId()))
-	if err != nil {
-		return nil, err
-	}
 	options := h.callbackConfig.EphemeralOptions(nsEntry.Name().String())
 	ctx, cancel := contextutil.WithDeadlineBuffer(ctx, options.LongPollTimeout, options.LongPollBuffer)
 	defer cancel()
@@ -2673,34 +2675,10 @@ func (h *Handler) startNexusOperation(
 	response := &nexuspb.StartOperationResponse{}
 	switch r := result.(type) {
 	case interface{ ValueAsAny() any }:
-		ps, err := sdkconverter.PreferProtoDataConverter.ToPayloads(r.ValueAsAny())
+		payload, err := h.encodeSystemNexusOperationOutput(r.ValueAsAny(), requestID)
 		if err != nil {
-			h.logger.Error("failed to encode payload", tag.NexusStageHandlerInbound, tag.Error(err), tag.RequestID(requestID))
-			return nil, serviceerror.NewInternal("internal error (request ID: " + requestID + ")")
+			return nil, err
 		}
-
-		var payload *commonpb.Payload
-		if len(ps.GetPayloads()) == 1 {
-			payload = ps.GetPayloads()[0]
-		}
-		// Responses from the System Nexus Endpoint are server generated, so we must mark them as system payloads.
-		if payload != nil {
-			if payload.Metadata == nil {
-				payload.Metadata = make(map[string][]byte, 1)
-			}
-
-			// For now, we require all responess from the System Nexus Endpoint be protobufs.
-			encoding := string(payload.Metadata["encoding"])
-			if encoding != "binary/protobuf" {
-				return nil, serviceerror.NewFailedPreconditionf("system payload must be encoded as binary/protobuf but got %s", encoding)
-			}
-			if _, ok := payload.Metadata["messageType"]; !ok {
-				return nil, serviceerror.NewFailedPrecondition("system payload missing messageType metadata key")
-			}
-
-			payload.Metadata[commonnexus.SystemPayloadMetadataKey] = []byte("true")
-		}
-
 		response.Variant = &nexuspb.StartOperationResponse_SyncSuccess{
 			SyncSuccess: &nexuspb.StartOperationResponse_Sync{
 				Payload: payload,
@@ -2723,10 +2701,52 @@ func (h *Handler) startNexusOperation(
 		Response: response,
 	}, nil
 }
+// encodeSystemNexusOperationOutput encodes the output of a system Nexus operation that completed synchronously.
+func (h *Handler) encodeSystemNexusOperationOutput(output any, requestID string) (*commonpb.Payload, error) {
+	// Operations that output a payload, e.g. ActivityService.GetResult, return a user payload as is.
+	if payload, ok := output.(*commonpb.Payload); ok {
+		return payload, nil
+	}
+	ps, err := sdkconverter.PreferProtoDataConverter.ToPayloads(output)
+	if err != nil {
+		h.logger.Error("failed to encode payload", tag.NexusStageHandlerInbound, tag.Error(err), tag.RequestID(requestID))
+		return nil, serviceerror.NewInternal("internal error (request ID: " + requestID + ")")
+	}
+
+	var payload *commonpb.Payload
+	if len(ps.GetPayloads()) == 1 {
+		payload = ps.GetPayloads()[0]
+	}
+	// Responses from the System Nexus Endpoint are server generated, so we must mark them as system payloads.
+	if payload != nil {
+		if payload.Metadata == nil {
+			payload.Metadata = make(map[string][]byte, 1)
+		}
+
+		// For now, we require all responess from the System Nexus Endpoint be protobufs.
+		encoding := string(payload.Metadata["encoding"])
+		if encoding != "binary/protobuf" {
+			return nil, serviceerror.NewFailedPreconditionf("system payload must be encoded as binary/protobuf but got %s", encoding)
+		}
+		if _, ok := payload.Metadata["messageType"]; !ok {
+			return nil, serviceerror.NewFailedPrecondition("system payload missing messageType metadata key")
+		}
+
+		payload.Metadata[commonnexus.SystemPayloadMetadataKey] = []byte("true")
+	}
+	return payload, nil
+}
+
 func (h *Handler) CancelNexusOperation(
 	ctx context.Context,
 	req *historyservice.CancelNexusOperationRequest,
 ) (*historyservice.CancelNexusOperationResponse, error) {
+	nsEntry, err := h.namespaceRegistry.GetNamespaceByID(namespace.ID(req.GetNamespaceId()))
+	if err != nil {
+		return nil, err
+	}
+	ctx = chasm.WithNexusOperationNamespace(ctx, nsEntry)
+
 	// Build nexus.CancelOperationOptions from the request
 	options := nexus.CancelOperationOptions{
 		// Header not supported for system endpoint operations.
@@ -2745,7 +2765,7 @@ func (h *Handler) CancelNexusOperation(
 	if h.nexusHandler == nil {
 		return nil, serviceerror.NewUnimplemented("no nexus services registered")
 	}
-	err := h.nexusHandler.CancelOperation(ctx, req.GetRequest().GetService(), req.GetRequest().GetOperation(), req.GetRequest().GetOperationToken(), options)
+	err = h.nexusHandler.CancelOperation(ctx, req.GetRequest().GetService(), req.GetRequest().GetOperation(), req.GetRequest().GetOperationToken(), options)
 	if err != nil {
 		// TODO: redact certain errors
 		return nil, nexusHandlerErrorToServiceError(err)

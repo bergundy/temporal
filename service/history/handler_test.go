@@ -466,16 +466,25 @@ func TestActivityMutationHandlers_MarkActivityIDInContextMetadata(t *testing.T) 
 	}
 }
 
-func TestStartNexusOperation_SystemNexusEndpointPayloadMetadataFlag(t *testing.T) {
+// newSystemNexusTestHandler returns a handler whose system Nexus endpoint serves the CHASM test service in
+// tests.NamespaceID.
+func newSystemNexusTestHandler(t *testing.T) *Handler {
 	registry := nexus.NewServiceRegistry()
 	registry.MustRegister(chasmtests.NewTestServiceNexusService())
 	nexusHandler, err := registry.NewHandler()
 	require.NoError(t, err)
 
-	h := Handler{
-		logger:       log.NewNoopLogger(),
-		nexusHandler: nexusHandler,
+	namespaceRegistry := namespace.NewMockRegistry(gomock.NewController(t))
+	namespaceRegistry.EXPECT().GetNamespaceByID(tests.NamespaceID).Return(tests.LocalNamespaceEntry, nil).AnyTimes()
+	return &Handler{
+		logger:            log.NewNoopLogger(),
+		namespaceRegistry: namespaceRegistry,
+		nexusHandler:      nexusHandler,
 	}
+}
+
+func TestStartNexusOperation_SystemNexusEndpointPayloadMetadataFlag(t *testing.T) {
+	h := newSystemNexusTestHandler(t)
 
 	testCases := []struct {
 		name      string
@@ -488,6 +497,7 @@ func TestStartNexusOperation_SystemNexusEndpointPayloadMetadataFlag(t *testing.T
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			resp, err := h.StartNexusOperation(context.Background(), &historyservice.StartNexusOperationRequest{
+				NamespaceId: tests.NamespaceID.String(),
 				Request: &nexuspb.StartOperationRequest{
 					Service:   "TestService",
 					Operation: tc.operation,
@@ -508,19 +518,12 @@ func TestStartNexusOperation_SystemNexusEndpointPayloadMetadataFlag(t *testing.T
 }
 
 func TestStartNexusOperation_SystemNexusEndpointRejectsNonProtoResponse(t *testing.T) {
-	registry := nexus.NewServiceRegistry()
-	registry.MustRegister(chasmtests.NewTestServiceNexusService())
-	nexusHandler, err := registry.NewHandler()
-	require.NoError(t, err)
-
-	h := Handler{
-		logger:       log.NewNoopLogger(),
-		nexusHandler: nexusHandler,
-	}
+	h := newSystemNexusTestHandler(t)
 
 	// TestOperationStringOutput returns a string, which the data converter encodes as JSON
 	// instead of protobuf. The System Nexus Endpoint only accepts protobuf-encoded responses.
 	resp, err := h.StartNexusOperation(context.Background(), &historyservice.StartNexusOperationRequest{
+		NamespaceId: tests.NamespaceID.String(),
 		Request: &nexuspb.StartOperationRequest{
 			Service:   "TestService",
 			Operation: "TestOperationStringOutput",
@@ -533,4 +536,19 @@ func TestStartNexusOperation_SystemNexusEndpointRejectsNonProtoResponse(t *testi
 	var failedPrecondition *serviceerror.FailedPrecondition
 	require.ErrorAs(t, err, &failedPrecondition)
 	require.ErrorContains(t, err, "system payload must be encoded as binary/protobuf but got json/plain")
+}
+
+func TestEncodeSystemNexusOperationOutput_Payload(t *testing.T) {
+	h := Handler{logger: log.NewNoopLogger()}
+
+	// Operations that output a payload return it as is, even if it isn't a system payload.
+	userPayload := payload.EncodeString("result")
+	encoded, err := h.encodeSystemNexusOperationOutput(userPayload, "test-request-id")
+	require.NoError(t, err)
+	require.Same(t, userPayload, encoded)
+	require.NotContains(t, encoded.GetMetadata(), commonnexus.SystemPayloadMetadataKey)
+
+	encoded, err = h.encodeSystemNexusOperationOutput((*commonpb.Payload)(nil), "test-request-id")
+	require.NoError(t, err)
+	require.Nil(t, encoded)
 }

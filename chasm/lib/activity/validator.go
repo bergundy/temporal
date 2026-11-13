@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 	activitypb "go.temporal.io/api/activity/v1"
+	"go.temporal.io/api/activityservice/v1"
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	nexuspb "go.temporal.io/api/nexus/v1"
@@ -365,6 +366,23 @@ func validateAndNormalizePollActivityExecutionRequest(
 	req *workflowservice.PollActivityExecutionRequest,
 	maxIDLengthLimit int,
 ) error {
+	if req.GetActivityId() == "" {
+		return serviceerror.NewInvalidArgument("activity ID is required")
+	}
+	if len(req.GetActivityId()) > maxIDLengthLimit {
+		return serviceerror.NewInvalidArgumentf("activity ID exceeds length limit. Length=%d Limit=%d",
+			len(req.GetActivityId()), maxIDLengthLimit)
+	}
+	if runID := req.GetRunId(); runID != "" {
+		_, err := uuid.Parse(runID)
+		if err != nil {
+			return serviceerror.NewInvalidArgument("invalid run id: must be a valid UUID")
+		}
+	}
+	return nil
+}
+
+func validateGetResultRequest(req *activityservice.GetResultRequest, maxIDLengthLimit int) error {
 	if req.GetActivityId() == "" {
 		return serviceerror.NewInvalidArgument("activity ID is required")
 	}
