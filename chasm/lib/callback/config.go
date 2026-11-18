@@ -60,7 +60,8 @@ var EphemeralLongPollTimeout = dynamicconfig.NewNamespaceDurationSetting(
 	"callback.ephemeral.longPollTimeout",
 	common.DefaultLongPollTimeout,
 	`Maximum time a request carrying an ephemeral callback waits for the operation to complete before it returns the
-operation as still running.`,
+operation as still running. Requests are also bounded by the frontend's timeout for history requests (30s), so values
+above 30s minus callback.ephemeral.longPollBuffer have no effect.`,
 )
 
 var EphemeralLongPollBuffer = dynamicconfig.NewNamespaceDurationSetting(
@@ -70,17 +71,11 @@ var EphemeralLongPollBuffer = dynamicconfig.NewNamespaceDurationSetting(
 caller's deadline.`,
 )
 
-var EphemeralTTL = dynamicconfig.NewNamespaceDurationSetting(
-	"callback.ephemeral.ttl",
-	2*time.Minute,
-	`How long an ephemeral callback stays attached to an execution before it can be pruned. Must exceed
-callback.ephemeral.longPollTimeout.`,
-)
-
 var EphemeralMaxPerExecution = dynamicconfig.NewNamespaceIntSetting(
 	"callback.ephemeral.maxPerExecution",
 	1000,
-	`The maximum number of ephemeral callbacks that can be attached to an execution at once.`,
+	`The maximum number of ephemeral callbacks that can be attached to an execution at once. Only callbacks whose
+requests are still waiting count: the others are pruned when a callback is attached.`,
 )
 
 type Config struct {
@@ -89,7 +84,6 @@ type Config struct {
 	InspectSourceHeader      dynamicconfig.BoolPropertyFn
 	EphemeralLongPollTimeout dynamicconfig.DurationPropertyFnWithNamespaceFilter
 	EphemeralLongPollBuffer  dynamicconfig.DurationPropertyFnWithNamespaceFilter
-	EphemeralTTL             dynamicconfig.DurationPropertyFnWithNamespaceFilter
 	EphemeralMaxPerExecution dynamicconfig.IntPropertyFnWithNamespaceFilter
 }
 
@@ -108,7 +102,6 @@ func configProvider(dc *dynamicconfig.Collection) *Config {
 		InspectSourceHeader:      InspectSourceHeader.Get(dc),
 		EphemeralLongPollTimeout: EphemeralLongPollTimeout.Get(dc),
 		EphemeralLongPollBuffer:  EphemeralLongPollBuffer.Get(dc),
-		EphemeralTTL:             EphemeralTTL.Get(dc),
 		EphemeralMaxPerExecution: EphemeralMaxPerExecution.Get(dc),
 	}
 }

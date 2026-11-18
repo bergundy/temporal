@@ -218,11 +218,31 @@ var (
 		"CompleteNexusOperation":          {Scope: ScopeNamespace, Access: AccessWrite, Polling: PollingNone},
 		"CompleteNexusOperationChasm":     {Scope: ScopeNamespace, Access: AccessWrite, Polling: PollingNone},
 	}
+	// systemNexusOperationMetadata holds the metadata of the system Nexus operations that can be called directly, via
+	// StartNexusOperation, keyed by their full method names (see SystemNexusOperationFullMethod). Authorization,
+	// concurrency limits and metering identify a direct call to one of these operations by its full method name instead
+	// of StartNexusOperation. Calls to operations that aren't listed here are identified as StartNexusOperation.
+	systemNexusOperationMetadata = map[string]MethodMetadata{
+		"/temporal.api.activityservice.v1.ActivityService/GetResult": {Scope: ScopeNamespace, Access: AccessReadOnly, Polling: PollingCapable},
+	}
 )
 
+// SystemNexusOperationFullMethod returns the full method name of a system Nexus operation, and whether the operation
+// can be called directly. System Nexus services are named after the proto services that define them, so this is the
+// operation's gRPC-style full method name, e.g. "/temporal.api.activityservice.v1.ActivityService/GetResult".
+func SystemNexusOperationFullMethod(service, operation string) (string, bool) {
+	fullMethod := "/" + service + "/" + operation
+	_, ok := systemNexusOperationMetadata[fullMethod]
+	return fullMethod, ok
+}
+
 // GetMethodMetadata gets metadata for a given API method in one of the services exported by
-// frontend (WorkflowService, OperatorService, AdminService).
+// frontend (WorkflowService, OperatorService, AdminService), or for a system Nexus operation that
+// can be called directly (see SystemNexusOperationFullMethod).
 func GetMethodMetadata(fullApiName string) MethodMetadata {
+	if metadata, ok := systemNexusOperationMetadata[fullApiName]; ok {
+		return metadata
+	}
 	switch {
 	case strings.HasPrefix(fullApiName, WorkflowServicePrefix):
 		return workflowServiceMetadata[MethodName(fullApiName)]

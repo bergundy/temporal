@@ -10,6 +10,7 @@ import (
 	callbackpb "go.temporal.io/api/callback/v1"
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
+	failurepb "go.temporal.io/api/failure/v1"
 	nexuspb "go.temporal.io/api/nexus/v1"
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/server/chasm"
@@ -106,9 +107,15 @@ func (c *Callback) loadInvocationArgs(
 		)
 	}
 
-	// Get the parent CHASM object's Nexus result to be delivered.
+	// Get the parent CHASM object's Nexus result to be delivered, unless the callback's operation was canceled.
 	target := c.CompletionSource.Get(ctx)
-	completion, err := target.GetNexusCompletion(ctx, c.RequestId)
+	var completion nexusrpc.CompleteOperationOptions
+	var err error
+	if c.GetCancelTime() != nil {
+		completion, err = c.canceledCompletion()
+	} else {
+		completion, err = target.GetNexusCompletion(ctx, c.RequestId)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -168,6 +175,34 @@ func (c *Callback) loadInvocationArgs(
 		runID:               ctx.ExecutionKey().RunID,
 		requestID:           c.RequestId,
 		attempt:             c.Attempt,
+	}, nil
+}
+
+// canceledCompletion returns the canceled outcome that a callback whose operation was canceled delivers instead of
+// its source's completion, see [CancelCompletionCallbacks]. It has the same shape as the completion of a canceled
+// source, so that callers handle it the same way.
+func (c *Callback) canceledCompletion() (nexusrpc.CompleteOperationOptions, error) {
+	nf, err := commonnexus.TemporalFailureToNexusFailure(&failurepb.Failure{
+		Message: "operation canceled",
+		FailureInfo: &failurepb.Failure_CanceledFailureInfo{
+			CanceledFailureInfo: &failurepb.CanceledFailureInfo{},
+		},
+	})
+	if err != nil {
+		return nexusrpc.CompleteOperationOptions{}, serviceerror.NewInternalf("failed to convert failure: %v", err)
+	}
+	opErr := &nexus.OperationError{
+		State:   nexus.OperationStateCanceled,
+		Message: "operation canceled",
+		Cause:   &nexus.FailureError{Failure: nf},
+	}
+	if err := nexusrpc.MarkAsWrapperError(nexusrpc.DefaultFailureConverter(), opErr); err != nil {
+		return nexusrpc.CompleteOperationOptions{}, err
+	}
+	return nexusrpc.CompleteOperationOptions{
+		StartTime: c.GetRegistrationTime().AsTime(),
+		CloseTime: c.GetCancelTime().AsTime(),
+		Error:     opErr,
 	}, nil
 }
 

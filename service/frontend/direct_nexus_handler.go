@@ -3,6 +3,7 @@ package frontend
 import (
 	"context"
 	"errors"
+	"strconv"
 
 	"github.com/google/uuid"
 	"github.com/nexus-rpc/sdk-go/nexus"
@@ -16,6 +17,8 @@ import (
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/namespace"
 	commonnexus "go.temporal.io/server/common/nexus"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 )
 
 var errDirectNexusCallsDisabled = serviceerror.NewUnimplemented("direct Nexus calls are disabled")
@@ -28,6 +31,7 @@ func (wh *WorkflowHandler) StartNexusOperation(
 	request *workflowservice.StartNexusOperationRequest,
 ) (_ *workflowservice.StartNexusOperationResponse, retError error) {
 	defer log.CapturePanic(wh.logger, &retError)
+	defer func() { setRetryableTrailer(ctx, retError) }()
 
 	if request == nil {
 		return nil, errRequestNotSet
@@ -135,6 +139,7 @@ func (wh *WorkflowHandler) CancelNexusOperation(
 	request *workflowservice.CancelNexusOperationRequest,
 ) (_ *workflowservice.CancelNexusOperationResponse, retError error) {
 	defer log.CapturePanic(wh.logger, &retError)
+	defer func() { setRetryableTrailer(ctx, retError) }()
 
 	if request == nil {
 		return nil, errRequestNotSet
@@ -178,6 +183,17 @@ func (wh *WorkflowHandler) CancelNexusOperation(
 		return nil, err
 	}
 	return &workflowservice.CancelNexusOperationResponse{}, nil
+}
+
+// setRetryableTrailer tells the caller whether to retry a request that failed with a Nexus handler error, since the
+// gRPC status code doesn't reflect the handler error's retry behavior. It's a trailer because gRPC clients read retry
+// signals from trailers.
+func setRetryableTrailer(ctx context.Context, err error) {
+	handlerErr, ok := commonnexus.HandlerErrorFromServiceError(err)
+	if !ok {
+		return
+	}
+	_ = grpc.SetTrailer(ctx, metadata.Pairs(commonnexus.RetryableTrailerName, strconv.FormatBool(handlerErr.Retryable())))
 }
 
 func validateDirectNexusRequest(endpoint, service, operation string, header map[string]string) error {

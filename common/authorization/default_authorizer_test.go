@@ -67,6 +67,10 @@ var (
 		APIName:   "/temporal.api.workflowservice.v1.WorkflowService/StartWorkflowExecution",
 		Namespace: testNamespace,
 	}
+	targetActivityGetResult = CallTarget{
+		APIName:   "/temporal.api.activityservice.v1.ActivityService/GetResult",
+		Namespace: testNamespace,
+	}
 	targetAdminAPI = CallTarget{
 		APIName:   "/temporal.server.api.adminservice.v1.AdminService/AddSearchAttributes",
 		Namespace: testNamespace,
@@ -140,6 +144,8 @@ func (s *defaultAuthorizerSuite) TestAuthorize() {
 		{"NamespaceReaderOnFooBar", claimsNamespaceReader, targetNamespaceWriteBar, DecisionDeny}, // namespace mismatch
 		{"NamespaceReaderOnListWorkflow", claimsNamespaceReader, targetGetSystemInfo, DecisionAllow},
 		{"NamespaceReaderOnOperatorNamespaceRead", claimsNamespaceReader, targetOperatorNamespaceRead, DecisionAllow},
+		{"NamespaceReaderOnActivityGetResult", claimsNamespaceReader, targetActivityGetResult, DecisionAllow},
+		{"RoleNoneOnActivityGetResult", claimsNone, targetActivityGetResult, DecisionDeny},
 
 		// healthcheck allowed to everyone
 		{"RoleNoneOnGetSystemInfo", claimsNone, targetGetSystemInfo, DecisionAllow},

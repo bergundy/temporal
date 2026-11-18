@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/api/workflowservice/v1"
@@ -15,9 +16,11 @@ import (
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/metrics/metricstest"
 	"go.temporal.io/server/common/namespace"
+	commonnexus "go.temporal.io/server/common/nexus"
 	"go.temporal.io/server/common/primitives"
 	"go.temporal.io/server/common/quotas/calculator"
 	"go.temporal.io/server/common/quotas/quotastest"
+	"go.temporal.io/server/service/frontend/configs"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
 )
@@ -178,6 +181,32 @@ func TestNamespaceCountLimitInterceptor_Intercept(t *testing.T) {
 			expectRateLimit: true,
 		},
 		{
+			name:               "long poll start nexus operation",
+			request:            getResultRequest(&commonpb.Callback{Variant: &commonpb.Callback_Ephemeral_{Ephemeral: &commonpb.Callback_Ephemeral{}}}),
+			numBlockedRequests: 3,
+			perInstanceLimit:   2,
+			globalLimit:        4,
+			memberCounter:      quotastest.NewFakeMemberCounter(2),
+			methodName:         "/temporal.api.workflowservice.v1.WorkflowService/StartNexusOperation",
+			tokens: map[string]int{
+				configs.PollStartNexusOperationAPIName: 1,
+			},
+			expectRateLimit: true,
+		},
+		{
+			name:               "non-long poll start nexus operation",
+			request:            getResultRequest(nil),
+			numBlockedRequests: 3,
+			perInstanceLimit:   2,
+			globalLimit:        4,
+			memberCounter:      quotastest.NewFakeMemberCounter(2),
+			methodName:         "/temporal.api.workflowservice.v1.WorkflowService/StartNexusOperation",
+			tokens: map[string]int{
+				configs.PollStartNexusOperationAPIName: 1,
+			},
+			expectRateLimit: false,
+		},
+		{
 			name:               "non-long poll describe nexus operation execution",
 			request:            &workflowservice.DescribeNexusOperationExecutionRequest{},
 			numBlockedRequests: 3,
@@ -297,6 +326,41 @@ func (h testRequestHandler) Handle(context.Context, any) (any, error) {
 	<-h.respond
 
 	return nil, nil
+}
+
+func getResultRequest(cb *commonpb.Callback) *workflowservice.StartNexusOperationRequest {
+	return &workflowservice.StartNexusOperationRequest{
+		Endpoint:           commonnexus.SystemEndpoint,
+		Service:            "temporal.api.activityservice.v1.ActivityService",
+		Operation:          "GetResult",
+		CompletionCallback: cb,
+	}
+}
+
+func TestNamespaceCountLimitInterceptorSystemNexusOperationBudgets(t *testing.T) {
+	t.Parallel()
+	ctrl := gomock.NewController(t)
+	tc := nsCountLimitTestCase{
+		perInstanceLimit: 1,
+		globalLimit:      0,
+		memberCounter:    quotastest.NewFakeMemberCounter(1),
+		tokens:           map[string]int{configs.PollStartNexusOperationAPIName: 1},
+	}
+	interceptor := tc.createInterceptor(ctrl)
+	ephemeral := &commonpb.Callback{Variant: &commonpb.Callback_Ephemeral_{Ephemeral: &commonpb.Callback_Ephemeral{}}}
+	method := "/temporal.api.workflowservice.v1.WorkflowService/StartNexusOperation"
+	allow := func(req any) error {
+		_, err := interceptor.Allow(namespace.Name("ns"), method, metrics.NoopMetricsHandler, req)
+		return err
+	}
+
+	require.NoError(t, allow(getResultRequest(ephemeral)))
+	// Another system operation has its own budget.
+	unlisted := getResultRequest(ephemeral)
+	unlisted.Operation = "Unlisted"
+	require.NoError(t, allow(unlisted))
+	// The operation's budget is used up.
+	require.ErrorIs(t, allow(getResultRequest(ephemeral)), ErrNamespaceCountLimitServerBusy)
 }
 
 func TestNamespaceCountLimitInterceptorPollerClassification(t *testing.T) {

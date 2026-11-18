@@ -109,6 +109,7 @@ type (
 		chasmRegistry                *chasm.Registry
 		nexusHandler                 nexus.Handler
 		callbackConfig               *callback.Config
+		ephemeralWaiters             *callback.EphemeralWaiters
 		testHooks                    testhooks.TestHooks
 
 		replicationTaskFetcherFactory    replication.TaskFetcherFactory
@@ -148,6 +149,7 @@ type (
 		ChasmEngine                  chasm.Engine
 		ChasmRegistry                *chasm.Registry
 		CallbackConfig               *callback.Config
+		EphemeralWaiters             *callback.EphemeralWaiters
 		TestHooks                    testhooks.TestHooks
 
 		ReplicationTaskFetcherFactory   replication.TaskFetcherFactory
@@ -173,6 +175,10 @@ var (
 	errSourceClusterNotSet     = serviceerror.NewInvalidArgument("Source Cluster not set on request.")
 	errShardIDNotSet           = serviceerror.NewInvalidArgument("ShardId not set on request.")
 	errTimestampNotSet         = serviceerror.NewInvalidArgument("Timestamp not set on request.")
+
+	errEphemeralCallbacksRequireSkipCleanUpdates = serviceerror.NewUnimplemented(
+		"ephemeral completion callbacks require history.enableCHASMSkipCleanUpdates",
+	)
 )
 
 // Start starts the handler
@@ -2572,6 +2578,11 @@ func (h *Handler) StartNexusOperation(
 	}
 	ctx = chasm.WithNexusOperationNamespace(ctx, nsEntry)
 	if req.GetRequest().GetCallback() == commonnexus.EphemeralCallbackURL {
+		// Attaching ephemeral callbacks updates the execution without durable changes, which would otherwise be
+		// written.
+		if !h.config.EnableCHASMSkipCleanUpdates(nsEntry.Name().String()) {
+			return nil, errEphemeralCallbacksRequireSkipCleanUpdates
+		}
 		return h.startNexusOperationWithEphemeralCallback(ctx, nsEntry, req)
 	}
 	return h.startNexusOperation(ctx, req)
@@ -2592,44 +2603,21 @@ func (h *Handler) startNexusOperationWithEphemeralCallback(
 
 	var pending *historyservice.StartNexusOperationResponse
 	for {
-		attemptCtx, registrar := callback.WithEphemeralRegistrar(pollCtx, options)
-		resp, err := h.startNexusOperation(attemptCtx, req)
+		resp, completion, err := h.startAndAwaitNexusOperation(pollCtx, options, req)
+		if errors.Is(err, callback.ErrEphemeralCallbackLost) {
+			// Start the operation again to attach a new callback, or get its outcome if it completed meanwhile.
+			pending = resp
+			continue
+		}
 		if err != nil {
 			if pending != nil && pollCtx.Err() != nil {
 				return pending, nil
 			}
 			return nil, err
 		}
-		if resp.GetResponse().GetAsyncSuccess() == nil {
-			return resp, nil
-		}
-		if !registrar.Registered() {
-			return nil, softassert.UnexpectedInternalErr(
-				h.logger,
-				"system Nexus operation started asynchronously without attaching the ephemeral callback",
-				fmt.Errorf("%s/%s", req.GetRequest().GetService(), req.GetRequest().GetOperation()),
-			)
-		}
-		pending = resp
-		completion, err := registrar.Await(pollCtx)
-		if errors.Is(err, callback.ErrEphemeralCallbackLost) {
-			// Start the operation again to attach a new callback, or get its outcome if it completed meanwhile.
-			continue
-		}
-		if err != nil {
-			return nil, err
-		}
 		if completion == nil {
-			// The request stopped waiting, so detach its callback rather than leave it until it's pruned.
-			if err := registrar.Detach(ctx); err != nil {
-				h.logger.Warn(
-					"failed to detach ephemeral callback",
-					tag.Error(err),
-					tag.WorkflowNamespaceID(req.GetNamespaceId()),
-					tag.RequestID(req.GetRequest().GetRequestId()),
-				)
-			}
-			return pending, nil
+			// The operation didn't start asynchronously, or the request stopped waiting.
+			return resp, nil
 		}
 		return h.startNexusOperationCompletionResponse(
 			*completion,
@@ -2637,6 +2625,31 @@ func (h *Handler) startNexusOperationWithEphemeralCallback(
 			req.GetRequest().GetRequestId(),
 		)
 	}
+}
+
+// startAndAwaitNexusOperation starts an operation with an ephemeral callback and, if it starts asynchronously, waits
+// for the callback. It returns the start response, and the operation's completion if it completed while waiting. The
+// request stops waiting for the callback when it returns.
+func (h *Handler) startAndAwaitNexusOperation(
+	pollCtx context.Context,
+	options callback.EphemeralOptions,
+	req *historyservice.StartNexusOperationRequest,
+) (*historyservice.StartNexusOperationResponse, *nexusrpc.CompleteOperationOptions, error) {
+	attemptCtx, registrar := callback.WithEphemeralRegistrar(pollCtx, options, h.ephemeralWaiters)
+	defer registrar.Release()
+	resp, err := h.startNexusOperation(attemptCtx, req)
+	if err != nil || resp.GetResponse().GetAsyncSuccess() == nil {
+		return resp, nil, err
+	}
+	if !registrar.Registered() {
+		return nil, nil, softassert.UnexpectedInternalErr(
+			h.logger,
+			"system Nexus operation started asynchronously without attaching the ephemeral callback",
+			fmt.Errorf("%s/%s", req.GetRequest().GetService(), req.GetRequest().GetOperation()),
+		)
+	}
+	completion, err := registrar.Await(pollCtx)
+	return resp, completion, err
 }
 
 // startNexusOperationCompletionResponse returns the outcome of an operation that completed asynchronously as a start
@@ -2757,6 +2770,7 @@ func (h *Handler) startNexusOperation(
 		Response: response,
 	}, nil
 }
+
 // encodeSystemNexusOperationOutput encodes the output of a system Nexus operation that completed synchronously.
 func (h *Handler) encodeSystemNexusOperationOutput(output any, requestID string) (*commonpb.Payload, error) {
 	// Operations that output a payload, e.g. ActivityService.GetResult, return a user payload as is.

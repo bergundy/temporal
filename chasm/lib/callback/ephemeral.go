@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -22,7 +23,7 @@ import (
 // delivered. They arrive as Nexus callbacks with the reserved [commonnexus.EphemeralCallbackURL] and are attached as
 // ephemeral CHASM components, so they are never persisted or invoked. The host schedules them along with its other
 // completion callbacks, at which point the waiting request reads the host's Nexus completion, i.e. what a durable
-// callback delivers.
+// callback delivers. A callback whose request stopped waiting is pruned when another one is attached to its host.
 
 const ephemeralCallbackKeyPrefix = "ephemeral-"
 
@@ -55,8 +56,6 @@ type EphemeralOptions struct {
 	LongPollTimeout time.Duration
 	// LongPollBuffer is the time a request leaves before the caller's deadline.
 	LongPollBuffer time.Duration
-	// TTL is how long an ephemeral callback stays attached before it can be pruned.
-	TTL time.Duration
 	// MaxPerExecution is the maximum number of ephemeral callbacks attached to an execution at once.
 	MaxPerExecution int
 }
@@ -66,9 +65,33 @@ func (c *Config) EphemeralOptions(namespaceName string) EphemeralOptions {
 	return EphemeralOptions{
 		LongPollTimeout: c.EphemeralLongPollTimeout(namespaceName),
 		LongPollBuffer:  c.EphemeralLongPollBuffer(namespaceName),
-		TTL:             c.EphemeralTTL(namespaceName),
 		MaxPerExecution: c.EphemeralMaxPerExecution(namespaceName),
 	}
+}
+
+// EphemeralWaiters is the set of requests on this host that are waiting for their ephemeral callbacks, by the
+// callbacks' keys. Ephemeral callbacks only live in this host's memory, so a callback whose key isn't in the set has
+// no request waiting for it.
+type EphemeralWaiters struct {
+	keys sync.Map
+}
+
+// NewEphemeralWaiters returns an empty set of waiters.
+func NewEphemeralWaiters() *EphemeralWaiters {
+	return &EphemeralWaiters{}
+}
+
+func (w *EphemeralWaiters) add(key string) {
+	w.keys.Store(key, struct{}{})
+}
+
+func (w *EphemeralWaiters) remove(key string) {
+	w.keys.Delete(key)
+}
+
+func (w *EphemeralWaiters) waiting(key string) bool {
+	_, ok := w.keys.Load(key)
+	return ok
 }
 
 type ephemeralRegistrarKey struct{}
@@ -77,6 +100,7 @@ type ephemeralRegistrarKey struct{}
 // for it.
 type EphemeralRegistrar struct {
 	options EphemeralOptions
+	waiters *EphemeralWaiters
 	// Reference to the component the callback is attached to. The callback itself has no reference until the
 	// transaction that creates it is closed.
 	hostRef []byte
@@ -87,10 +111,23 @@ type EphemeralRegistrar struct {
 }
 
 // WithEphemeralRegistrar returns a context that allows attaching an ephemeral callback, and the registrar that
-// records it.
-func WithEphemeralRegistrar(ctx context.Context, options EphemeralOptions) (context.Context, *EphemeralRegistrar) {
-	registrar := &EphemeralRegistrar{options: options}
+// records it. The request counts as waiting for the callback, which keeps it from being pruned, until it calls
+// [EphemeralRegistrar.Release].
+func WithEphemeralRegistrar(
+	ctx context.Context,
+	options EphemeralOptions,
+	waiters *EphemeralWaiters,
+) (context.Context, *EphemeralRegistrar) {
+	registrar := &EphemeralRegistrar{options: options, waiters: waiters}
 	return context.WithValue(ctx, ephemeralRegistrarKey{}, registrar), registrar
+}
+
+// Release stops waiting for the attached ephemeral callback, if any, so that it's pruned when another callback is
+// attached to its host.
+func (r *EphemeralRegistrar) Release() {
+	if r.key != "" {
+		r.waiters.remove(r.key)
+	}
 }
 
 // Registered reports whether an ephemeral callback was attached.
@@ -124,23 +161,6 @@ func (r *EphemeralRegistrar) Await(ctx context.Context) (*nexusrpc.CompleteOpera
 		return nil, nil
 	}
 	return completion, err
-}
-
-// Detach removes the attached ephemeral callback once the request stops waiting for it, so that the callback doesn't
-// count against the host's limit until it's pruned. The request may have been canceled, so Detach ignores ctx's
-// cancellation, but it gives up after the long-poll buffer.
-func (r *EphemeralRegistrar) Detach(ctx context.Context) error {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.options.LongPollBuffer)
-	defer cancel()
-	_, _, err := chasm.UpdateComponent(ctx, r.hostRef, func(
-		host Holder,
-		_ chasm.MutableContext,
-		key string,
-	) (struct{}, error) {
-		delete(host.CompletionCallbacks(), key)
-		return struct{}{}, nil
-	}, r.key)
-	return err
 }
 
 func attachEphemeral(
@@ -179,6 +199,9 @@ func attachEphemeral(
 	if registrationTime == nil {
 		registrationTime = timestamppb.New(ctx.Now(hostComponent))
 	}
+	// The request waits for the callback attached below instead of one it attached earlier, e.g. in an earlier attempt
+	// of the update, which is pruned.
+	registrar.Release()
 	callbacks := host.CompletionCallbacks()
 	attached := 0
 	for key, field := range callbacks {
@@ -189,8 +212,8 @@ func attachEphemeral(
 		if !cb.IsEphemeral() {
 			continue
 		}
-		// Prune callbacks whose request is no longer waiting.
-		if registrationTime.AsTime().Sub(cb.GetRegistrationTime().AsTime()) > registrar.options.TTL {
+		// Prune callbacks whose request stopped waiting.
+		if !registrar.waiters.waiting(key) {
 			delete(callbacks, key)
 			continue
 		}
@@ -209,6 +232,7 @@ func attachEphemeral(
 		NewCallback(requestID, registrationTime, chasmCB),
 		chasm.ComponentFieldEphemeral(),
 	)
+	registrar.waiters.add(key)
 	registrar.hostRef = hostRef
 	registrar.key = key
 	registrar.requestID = requestID

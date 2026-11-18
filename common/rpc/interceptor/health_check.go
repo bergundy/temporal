@@ -168,7 +168,7 @@ func specialCaseAPIIsPolling(req any) bool {
 	case *workflowservice.DescribeActivityExecutionRequest:
 		return len(request.GetLongPollToken()) > 0
 	case *workflowservice.StartNexusOperationRequest:
-		return request.GetCompletionCallback().GetEphemeral() != nil
+		return IsLongPollStartNexusOperationRequest(request)
 	default:
 		return false
 	}

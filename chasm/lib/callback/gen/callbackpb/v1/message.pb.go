@@ -130,7 +130,10 @@ type CallbackState struct {
 	// TODO(temporal/issues/11958): This field is overloaded. It is used for _both_, the outgoing
 	// request ID (to serve as an idempotency key). As well as the source request ID, to identify
 	// when the callback was added (for buffered workflow event scenarios).
-	RequestId     string `protobuf:"bytes,9,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	RequestId string `protobuf:"bytes,9,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
+	// The time when the operation that the callback completes was canceled, without affecting the callback's source.
+	// If set, the callback delivers a canceled outcome instead of its source's completion.
+	CancelTime    *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=cancel_time,json=cancelTime,proto3" json:"cancel_time,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -219,6 +222,13 @@ func (x *CallbackState) GetRequestId() string {
 		return x.RequestId
 	}
 	return ""
+}
+
+func (x *CallbackState) GetCancelTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CancelTime
+	}
+	return nil
 }
 
 type Callback struct {
@@ -542,7 +552,7 @@ var File_temporal_server_chasm_lib_callback_proto_v1_message_proto protoreflect.
 
 const file_temporal_server_chasm_lib_callback_proto_v1_message_proto_rawDesc = "" +
 	"\n" +
-	"9temporal/server/chasm/lib/callback/proto/v1/message.proto\x12,temporal.server.chasm.lib.callbacks.proto.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a$temporal/api/common/v1/message.proto\x1a%temporal/api/failure/v1/message.proto\"\xd3\x04\n" +
+	"9temporal/server/chasm/lib/callback/proto/v1/message.proto\x12,temporal.server.chasm.lib.callbacks.proto.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a$temporal/api/common/v1/message.proto\x1a%temporal/api/failure/v1/message.proto\"\x90\x05\n" +
 	"\rCallbackState\x12R\n" +
 	"\bcallback\x18\x01 \x01(\v26.temporal.server.chasm.lib.callbacks.proto.v1.CallbackR\bcallback\x12G\n" +
 	"\x11registration_time\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x10registrationTime\x12T\n" +
@@ -552,7 +562,10 @@ const file_temporal_server_chasm_lib_callback_proto_v1_message_proto_rawDesc = "
 	"\x14last_attempt_failure\x18\a \x01(\v2 .temporal.api.failure.v1.FailureR\x12lastAttemptFailure\x12W\n" +
 	"\x1anext_attempt_schedule_time\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\x17nextAttemptScheduleTime\x12\x1d\n" +
 	"\n" +
-	"request_id\x18\t \x01(\tR\trequestId\x1a\x10\n" +
+	"request_id\x18\t \x01(\tR\trequestId\x12;\n" +
+	"\vcancel_time\x18\n" +
+	" \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"cancelTime\x1a\x10\n" +
 	"\x0eWorkflowClosed\"\x83\x05\n" +
 	"\bCallback\x12T\n" +
 	"\x05nexus\x18\x02 \x01(\v2<.temporal.server.chasm.lib.callbacks.proto.v1.Callback.NexusH\x00R\x05nexus\x12j\n" +
@@ -616,16 +629,17 @@ var file_temporal_server_chasm_lib_callback_proto_v1_message_proto_depIdxs = []i
 	8,  // 3: temporal.server.chasm.lib.callbacks.proto.v1.CallbackState.last_attempt_complete_time:type_name -> google.protobuf.Timestamp
 	9,  // 4: temporal.server.chasm.lib.callbacks.proto.v1.CallbackState.last_attempt_failure:type_name -> temporal.api.failure.v1.Failure
 	8,  // 5: temporal.server.chasm.lib.callbacks.proto.v1.CallbackState.next_attempt_schedule_time:type_name -> google.protobuf.Timestamp
-	5,  // 6: temporal.server.chasm.lib.callbacks.proto.v1.Callback.nexus:type_name -> temporal.server.chasm.lib.callbacks.proto.v1.Callback.Nexus
-	6,  // 7: temporal.server.chasm.lib.callbacks.proto.v1.Callback.nexus_handler:type_name -> temporal.server.chasm.lib.callbacks.proto.v1.Callback.NexusHandler
-	10, // 8: temporal.server.chasm.lib.callbacks.proto.v1.Callback.links:type_name -> temporal.api.common.v1.Link
-	7,  // 9: temporal.server.chasm.lib.callbacks.proto.v1.Callback.Nexus.header:type_name -> temporal.server.chasm.lib.callbacks.proto.v1.Callback.Nexus.HeaderEntry
-	11, // 10: temporal.server.chasm.lib.callbacks.proto.v1.Callback.NexusHandler.source_context:type_name -> temporal.api.common.v1.Payload
-	11, // [11:11] is the sub-list for method output_type
-	11, // [11:11] is the sub-list for method input_type
-	11, // [11:11] is the sub-list for extension type_name
-	11, // [11:11] is the sub-list for extension extendee
-	0,  // [0:11] is the sub-list for field type_name
+	8,  // 6: temporal.server.chasm.lib.callbacks.proto.v1.CallbackState.cancel_time:type_name -> google.protobuf.Timestamp
+	5,  // 7: temporal.server.chasm.lib.callbacks.proto.v1.Callback.nexus:type_name -> temporal.server.chasm.lib.callbacks.proto.v1.Callback.Nexus
+	6,  // 8: temporal.server.chasm.lib.callbacks.proto.v1.Callback.nexus_handler:type_name -> temporal.server.chasm.lib.callbacks.proto.v1.Callback.NexusHandler
+	10, // 9: temporal.server.chasm.lib.callbacks.proto.v1.Callback.links:type_name -> temporal.api.common.v1.Link
+	7,  // 10: temporal.server.chasm.lib.callbacks.proto.v1.Callback.Nexus.header:type_name -> temporal.server.chasm.lib.callbacks.proto.v1.Callback.Nexus.HeaderEntry
+	11, // 11: temporal.server.chasm.lib.callbacks.proto.v1.Callback.NexusHandler.source_context:type_name -> temporal.api.common.v1.Payload
+	12, // [12:12] is the sub-list for method output_type
+	12, // [12:12] is the sub-list for method input_type
+	12, // [12:12] is the sub-list for extension type_name
+	12, // [12:12] is the sub-list for extension extendee
+	0,  // [0:12] is the sub-list for field type_name
 }
 
 func init() { file_temporal_server_chasm_lib_callback_proto_v1_message_proto_init() }

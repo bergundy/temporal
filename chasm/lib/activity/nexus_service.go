@@ -2,6 +2,7 @@ package activity
 
 import (
 	"context"
+	"errors"
 
 	"github.com/nexus-rpc/sdk-go/nexus"
 	"go.temporal.io/api/activityservice/v1"
@@ -20,7 +21,7 @@ var activityServiceNexus = workflowservicenexus.TemporalAPIActivityserviceV1Acti
 // getResultOperation implements the ActivityService GetResult system Nexus operation. Its outcome is the activity's
 // Nexus completion, i.e. what the activity's completion callbacks deliver. It completes synchronously if the activity
 // is closed. Otherwise it attaches the request's callback to the activity and completes asynchronously, via that
-// callback.
+// callback. Canceling the operation doesn't affect the activity: the callback delivers a canceled outcome instead.
 type getResultOperation struct {
 	nexus.UnimplementedOperation[*activityservice.GetResultRequest, *commonpb.Payload]
 
@@ -31,6 +32,8 @@ type getResultOperation struct {
 // business ID is the activity ID.
 type getResultTokenData struct {
 	RunID string `json:"rid"`
+	// RequestID of the start request, which identifies the callback it attached.
+	RequestID string `json:"req"`
 }
 
 func (o *getResultOperation) Name() string {
@@ -114,7 +117,7 @@ func (o *getResultOperation) Start(
 
 	token, err := chasm.NexusOperationToken[getResultTokenData]{
 		BusinessID: req.GetActivityId(),
-		Data:       getResultTokenData{RunID: res.runID},
+		Data:       getResultTokenData{RunID: res.runID, RequestID: options.RequestID},
 	}.Encode()
 	if err != nil {
 		return nil, serviceerror.NewInternal(err.Error())
@@ -122,12 +125,37 @@ func (o *getResultOperation) Start(
 	return &nexus.HandlerStartOperationResultAsync{OperationToken: token}, nil
 }
 
-// Cancel is a no-op: waiting for an activity's result doesn't affect the activity.
-func (o *getResultOperation) Cancel(_ context.Context, token string, _ nexus.CancelOperationOptions) error {
-	if _, err := chasm.DecodeNexusOperationToken[getResultTokenData](token); err != nil {
+// Cancel cancels the operation without affecting the activity: the callback attached by the operation's start, if
+// it's still waiting for the activity, delivers a canceled outcome instead. Otherwise, e.g. if the activity closed or
+// no longer exists, canceling is a no-op.
+func (o *getResultOperation) Cancel(ctx context.Context, token string, _ nexus.CancelOperationOptions) error {
+	decoded, err := chasm.DecodeNexusOperationToken[getResultTokenData](token)
+	if err != nil {
 		return nexus.NewHandlerErrorf(nexus.HandlerErrorTypeBadRequest, "invalid operation token: %v", err)
 	}
-	return nil
+	if decoded.BusinessID == "" {
+		return nexus.NewHandlerErrorf(nexus.HandlerErrorTypeBadRequest, "invalid operation token: missing activity ID")
+	}
+	ns, ok := chasm.NexusOperationNamespace(ctx)
+	if !ok {
+		return serviceerror.NewInternal("system Nexus operation namespace not set")
+	}
+	ref := chasm.NewComponentRef[*Activity](chasm.ExecutionKey{
+		NamespaceID: ns.ID().String(),
+		BusinessID:  decoded.BusinessID,
+		RunID:       decoded.Data.RunID,
+	})
+	_, _, err = chasm.UpdateComponent(ctx, ref, func(
+		a *Activity,
+		ctx chasm.MutableContext,
+		requestID string,
+	) (struct{}, error) {
+		return struct{}{}, callback.CancelCompletionCallbacks(ctx, a, requestID)
+	}, decoded.Data.RequestID)
+	if _, ok := errors.AsType[*serviceerror.NotFound](err); ok {
+		return nil
+	}
+	return err
 }
 
 // getResultProcessor validates GetResult operation inputs and routes them to the activity's shard.

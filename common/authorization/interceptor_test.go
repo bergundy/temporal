@@ -22,6 +22,7 @@ import (
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/namespace"
+	commonnexus "go.temporal.io/server/common/nexus"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -118,6 +119,57 @@ func (s *authorizerInterceptorSuite) TestIsAuthorizedWithNamespace() {
 	res, err := s.interceptor.Intercept(ctx, startWorkflowExecutionRequest, startWorkflowExecutionInfo, s.handler)
 	s.True(res.(bool))
 	s.NoError(err)
+}
+
+func (s *authorizerInterceptorSuite) TestDirectSystemNexusOperationIsAuthorizedAsTheOperation() {
+	startNexusOperationInfo := &grpc.UnaryServerInfo{FullMethod: api.WorkflowServicePrefix + "StartNexusOperation"}
+	for _, tc := range []struct {
+		name            string
+		endpoint        string
+		service         string
+		operation       string
+		expectedAPIName string
+	}{
+		{
+			name:            "SystemOperation",
+			endpoint:        commonnexus.SystemEndpoint,
+			service:         "temporal.api.activityservice.v1.ActivityService",
+			operation:       "GetResult",
+			expectedAPIName: "/temporal.api.activityservice.v1.ActivityService/GetResult",
+		},
+		{
+			name:            "UnlistedSystemOperation",
+			endpoint:        commonnexus.SystemEndpoint,
+			service:         "temporal.api.workflowservice.v1.WorkflowService",
+			operation:       "GetSystemInfo",
+			expectedAPIName: startNexusOperationInfo.FullMethod,
+		},
+		{
+			name:            "OtherEndpoint",
+			endpoint:        "some-endpoint",
+			service:         "temporal.api.activityservice.v1.ActivityService",
+			operation:       "GetResult",
+			expectedAPIName: startNexusOperationInfo.FullMethod,
+		},
+	} {
+		s.Run(tc.name, func() {
+			request := &workflowservice.StartNexusOperationRequest{
+				Namespace: testNamespace,
+				Endpoint:  tc.endpoint,
+				Service:   tc.service,
+				Operation: tc.operation,
+			}
+			s.mockAuthorizer.EXPECT().Authorize(ctx, nil, &CallTarget{
+				Namespace: testNamespace,
+				Request:   request,
+				APIName:   tc.expectedAPIName,
+			}).Return(Result{Decision: DecisionAllow}, nil)
+
+			res, err := s.interceptor.Intercept(ctx, request, startNexusOperationInfo, s.handler)
+			s.NoError(err)
+			s.True(res.(bool))
+		})
+	}
 }
 
 func TestNexusResponseRequiresRequestedNamespaceAuthorization(t *testing.T) {

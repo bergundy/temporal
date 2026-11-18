@@ -127,6 +127,8 @@ func (ni *NamespaceRateLimitInterceptorImpl) InterceptN(
 			method = configs.PollWorkflowHistoryAPIName
 		} else if IsLongPollDescribeActivityExecutionRequest(req) {
 			method = configs.PollActivityExecutionAPIName
+		} else if IsLongPollStartNexusOperationRequest(req) {
+			method = configs.PollStartNexusOperationAPIName
 		}
 		if _, ok := ni.pollMethods[info.FullMethod]; ok && ni.pollWaitForToken(ns.String()) {
 			if err := ni.WaitN(ctx, ns, method, headers.NewGRPCHeaderGetter(ctx), numToken); err != nil {

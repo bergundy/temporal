@@ -39,8 +39,11 @@ func (h *fakeComponentHost) GetNexusCompletion(_ chasm.Context, requestID string
 	return h.completion, nil
 }
 
-func newEphemeralTestContext(options EphemeralOptions) (*chasm.MockMutableContext, *EphemeralRegistrar) {
-	goCtx, registrar := WithEphemeralRegistrar(context.Background(), options)
+func newEphemeralTestContext(
+	options EphemeralOptions,
+	waiters *EphemeralWaiters,
+) (*chasm.MockMutableContext, *EphemeralRegistrar) {
+	goCtx, registrar := WithEphemeralRegistrar(context.Background(), options, waiters)
 	return &chasm.MockMutableContext{
 		MockContext: chasm.MockContext{
 			GoCtx: goCtx,
@@ -68,11 +71,12 @@ func ephemeralKeys(host *fakeComponentHost) []string {
 func TestAttachEphemeral(t *testing.T) {
 	t.Parallel()
 	validator := test.NewCallbacksValidator(t, test.NewCallbacksValidatorConfig())
-	options := EphemeralOptions{TTL: time.Minute, MaxPerExecution: 2}
+	options := EphemeralOptions{LongPollTimeout: time.Minute, MaxPerExecution: 2}
+	waiters := NewEphemeralWaiters()
 	ephemeral := nexusCallbacks(commonnexus.EphemeralCallbackURL)
 
 	t.Run("AttachesWithoutAccounting", func(t *testing.T) {
-		ctx, registrar := newEphemeralTestContext(options)
+		ctx, registrar := newEphemeralTestContext(options, waiters)
 		host := &fakeComponentHost{fakeHost: newFakeHost()}
 
 		require.NoError(t, ValidateAndAttach(ctx, host, "req-1", timestamppb.Now(), ephemeral, "ns", validator))
@@ -94,7 +98,7 @@ func TestAttachEphemeral(t *testing.T) {
 	})
 
 	t.Run("AttachesAlongWithDurableCallbacks", func(t *testing.T) {
-		ctx, registrar := newEphemeralTestContext(options)
+		ctx, registrar := newEphemeralTestContext(options, waiters)
 		host := &fakeComponentHost{fakeHost: newFakeHost()}
 		cbs := nexusCallbacks(commonnexus.EphemeralCallbackURL, "http://cb-1")
 
@@ -104,7 +108,7 @@ func TestAttachEphemeral(t *testing.T) {
 		require.Equal(t, int64(1), host.metadata.GetTotalCallbacksCount())
 
 		// A retry of the request attaches another ephemeral callback, but not the durable callback.
-		retryCtx, retryRegistrar := newEphemeralTestContext(options)
+		retryCtx, retryRegistrar := newEphemeralTestContext(options, waiters)
 		require.NoError(t, ValidateAndAttach(retryCtx, host, "req-1", timestamppb.Now(), cbs, "ns", validator))
 		require.True(t, retryRegistrar.Registered())
 		require.Len(t, ephemeralKeys(host), 2)
@@ -113,7 +117,7 @@ func TestAttachEphemeral(t *testing.T) {
 	})
 
 	t.Run("RejectsMultipleEphemeralCallbacks", func(t *testing.T) {
-		ctx, _ := newEphemeralTestContext(options)
+		ctx, _ := newEphemeralTestContext(options, waiters)
 		host := &fakeComponentHost{fakeHost: newFakeHost()}
 		cbs := nexusCallbacks(commonnexus.EphemeralCallbackURL, commonnexus.EphemeralCallbackURL)
 
@@ -123,7 +127,7 @@ func TestAttachEphemeral(t *testing.T) {
 	})
 
 	t.Run("RejectsAClosedHost", func(t *testing.T) {
-		ctx, registrar := newEphemeralTestContext(options)
+		ctx, registrar := newEphemeralTestContext(options, waiters)
 		host := &fakeComponentHost{fakeHost: newFakeHost()}
 		host.lifecycle = chasm.LifecycleStateCompleted
 
@@ -133,7 +137,7 @@ func TestAttachEphemeral(t *testing.T) {
 	})
 
 	t.Run("IgnoresDurableCallbacksOfTheSameRequest", func(t *testing.T) {
-		ctx, registrar := newEphemeralTestContext(options)
+		ctx, registrar := newEphemeralTestContext(options, waiters)
 		host := &fakeComponentHost{fakeHost: newFakeHost()}
 
 		require.NoError(t, Attach(ctx, host, "req-1", timestamppb.Now(), nexusCallbacks("http://cb-1")))
@@ -143,27 +147,43 @@ func TestAttachEphemeral(t *testing.T) {
 		require.Equal(t, int64(1), host.metadata.GetTotalCallbacksCount())
 	})
 
-	t.Run("PrunesExpiredCallbacksAndEnforcesTheLimit", func(t *testing.T) {
-		ctx, registrar := newEphemeralTestContext(options)
+	t.Run("PrunesCallbacksWithoutWaitersAndEnforcesTheLimit", func(t *testing.T) {
 		host := &fakeComponentHost{fakeHost: newFakeHost()}
-		start := time.Now()
+		attach := func(requestID string) (*EphemeralRegistrar, error) {
+			ctx, registrar := newEphemeralTestContext(options, waiters)
+			return registrar, Attach(ctx, host, requestID, timestamppb.Now(), ephemeral)
+		}
 
-		require.NoError(t, Attach(ctx, host, "req-1", timestamppb.New(start), ephemeral))
-		first := registrar.key
-		require.NoError(t, Attach(ctx, host, "req-2", timestamppb.New(start.Add(time.Second)), ephemeral))
-		err := Attach(ctx, host, "req-3", timestamppb.New(start.Add(2*time.Second)), ephemeral)
+		first, err := attach("req-1")
+		require.NoError(t, err)
+		second, err := attach("req-2")
+		require.NoError(t, err)
+		_, err = attach("req-3")
 		require.ErrorAs(t, err, new(*serviceerror.ResourceExhausted))
 
-		// Once the first callback outlives its TTL, it's pruned to make room.
-		require.NoError(t, Attach(ctx, host, "req-3", timestamppb.New(start.Add(time.Minute+time.Second/2)), ephemeral))
-		require.Len(t, ephemeralKeys(host), 2)
-		require.NotContains(t, host.callbacks, first)
+		// Once the first request stops waiting, its callback is pruned to make room.
+		first.Release()
+		third, err := attach("req-3")
+		require.NoError(t, err)
+		require.ElementsMatch(t, []string{second.key, third.key}, ephemeralKeys(host))
+	})
+
+	t.Run("PrunesACallbackTheRequestNoLongerWaitsFor", func(t *testing.T) {
+		ctx, registrar := newEphemeralTestContext(options, waiters)
+		host := &fakeComponentHost{fakeHost: newFakeHost()}
+
+		require.NoError(t, Attach(ctx, host, "req-1", timestamppb.Now(), ephemeral))
+		first := registrar.key
+		// E.g. the update that attached the first callback runs again.
+		require.NoError(t, Attach(ctx, host, "req-1", timestamppb.Now(), ephemeral))
+		require.Equal(t, []string{registrar.key}, ephemeralKeys(host))
+		require.NotEqual(t, first, registrar.key)
 	})
 }
 
 func TestScheduleCompletionCallbacks_Ephemeral(t *testing.T) {
 	t.Parallel()
-	ctx, registrar := newEphemeralTestContext(EphemeralOptions{TTL: time.Minute, MaxPerExecution: 1})
+	ctx, registrar := newEphemeralTestContext(EphemeralOptions{LongPollTimeout: time.Minute, MaxPerExecution: 1}, NewEphemeralWaiters())
 	host := &fakeComponentHost{fakeHost: newFakeHost()}
 	require.NoError(t, Attach(ctx, host, "req-1", timestamppb.Now(), nexusCallbacks("http://cb-1")))
 	require.NoError(t, Attach(ctx, host, "req-2", timestamppb.Now(), nexusCallbacks(commonnexus.EphemeralCallbackURL)))
@@ -201,14 +221,14 @@ func expectPoll(engine *chasm.MockEngine, chasmCtx chasm.Context, host *fakeComp
 
 func TestEphemeralRegistrar_Await(t *testing.T) {
 	t.Parallel()
-	options := EphemeralOptions{TTL: time.Minute, MaxPerExecution: 1}
+	options := EphemeralOptions{LongPollTimeout: time.Minute, MaxPerExecution: 1}
 	completion := nexusrpc.CompleteOperationOptions{
 		Result: &commonpb.Payload{Data: []byte("result")},
 		Links:  []nexus.Link{{Type: "test"}},
 	}
 	setup := func(t *testing.T) (context.Context, *chasm.MockMutableContext, *fakeComponentHost, *EphemeralRegistrar) {
 		engine := chasm.NewMockEngine(gomock.NewController(t))
-		chasmCtx, registrar := newEphemeralTestContext(options)
+		chasmCtx, registrar := newEphemeralTestContext(options, NewEphemeralWaiters())
 		host := &fakeComponentHost{fakeHost: newFakeHost(), completion: completion}
 		require.NoError(t, Attach(chasmCtx, host, "req-1", timestamppb.Now(), nexusCallbacks(commonnexus.EphemeralCallbackURL)))
 		expectPoll(engine, chasmCtx, host)
@@ -253,34 +273,4 @@ func TestEphemeralRegistrar_Await(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, &completion, got)
 	})
-}
-
-func TestEphemeralRegistrar_Detach(t *testing.T) {
-	t.Parallel()
-	engine := chasm.NewMockEngine(gomock.NewController(t))
-	chasmCtx, registrar := newEphemeralTestContext(EphemeralOptions{
-		LongPollBuffer:  time.Second,
-		TTL:             time.Minute,
-		MaxPerExecution: 2,
-	})
-	host := &fakeComponentHost{fakeHost: newFakeHost()}
-	require.NoError(t, Attach(chasmCtx, host, "req-1", timestamppb.Now(), nexusCallbacks("http://cb-1")))
-	require.NoError(t, Attach(chasmCtx, host, "req-2", timestamppb.Now(), nexusCallbacks(commonnexus.EphemeralCallbackURL)))
-	engine.EXPECT().UpdateComponent(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(
-		ctx context.Context,
-		_ chasm.ComponentRef,
-		updateFn func(chasm.MutableContext, chasm.Component) error,
-		_ ...chasm.TransitionOption,
-	) ([]byte, error) {
-		// The callback is detached even though the request was canceled.
-		require.NoError(t, ctx.Err())
-		return []byte("ref"), updateFn(chasmCtx, host)
-	})
-
-	// The request is canceled, e.g. because its caller went away.
-	ctx, cancel := context.WithCancel(chasm.NewEngineContext(context.Background(), engine))
-	cancel()
-	require.NoError(t, registrar.Detach(ctx))
-	require.Empty(t, ephemeralKeys(host))
-	require.Len(t, host.callbacks, 1, "durable callbacks stay attached")
 }

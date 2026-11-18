@@ -13,8 +13,10 @@ import (
 	"go.temporal.io/server/common/log/tag"
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/namespace"
+	commonnexus "go.temporal.io/server/common/nexus"
 	"go.temporal.io/server/common/primitives"
 	"go.temporal.io/server/common/quotas/calculator"
+	"go.temporal.io/server/service/frontend/configs"
 	"google.golang.org/grpc"
 )
 
@@ -114,6 +116,17 @@ func (ni *ConcurrentRequestLimitInterceptor) Allow(
 	mh metrics.Handler,
 	req any,
 ) (func(), error) {
+	counterMethodName := methodName
+	// StartNexusOperation is only long-running when it carries an ephemeral callback. Each system Nexus operation that
+	// can be called directly has its own budget.
+	if IsLongPollStartNexusOperationRequest(req) {
+		methodName = configs.PollStartNexusOperationAPIName
+		counterMethodName = methodName
+		if fullMethod, ok := commonnexus.SystemOperationFullMethod(req); ok {
+			counterMethodName = fullMethod
+		}
+	}
+
 	// token will default to 0
 	token := ni.tokens[methodName]
 
@@ -146,7 +159,7 @@ func (ni *ConcurrentRequestLimitInterceptor) Allow(
 		quotaCalculator = ni.internalQuotaCalculator
 	}
 
-	counter := ni.counter(namespaceName, methodName, internal)
+	counter := ni.counter(namespaceName, counterMethodName, internal)
 	count := atomic.AddInt32(counter, int32(token))
 	cleanup := func() { atomic.AddInt32(counter, -int32(token)) }
 

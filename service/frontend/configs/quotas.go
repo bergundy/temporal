@@ -23,6 +23,9 @@ const (
 	PollWorkflowHistoryAPIName = "/temporal.api.workflowservice.v1.WorkflowService/PollWorkflowExecutionHistory"
 	// PollActivityExecutionAPIName is used instead of DescribeActivityExecution if LongPollToken is set in request.
 	PollActivityExecutionAPIName = "/temporal.api.workflowservice.v1.WorkflowService/PollActivityExecutionDescription"
+	// PollStartNexusOperationAPIName is used instead of StartNexusOperation if the request carries an ephemeral
+	// completion callback, which holds it open until the operation completes.
+	PollStartNexusOperationAPIName = "/temporal.api.workflowservice.v1.WorkflowService/PollStartNexusOperation"
 )
 
 var (
@@ -59,8 +62,9 @@ var (
 		// Potentially long-running, depending on the operations.
 		"/temporal.api.workflowservice.v1.WorkflowService/ExecuteMultiOperation": 1,
 
-		// Long-polls if the request carries an ephemeral callback.
-		"/temporal.api.workflowservice.v1.WorkflowService/StartNexusOperation": 1,
+		// Long-polls until the operation completes. Each system Nexus operation that can be called directly has its own
+		// budget, see api.SystemNexusOperationFullMethod.
+		PollStartNexusOperationAPIName: 1,
 
 		// Dispatching a Nexus task is a potentially long running RPC, it's classified in the same bucket as QueryWorkflow.
 		DispatchNexusTaskByNamespaceAndTaskQueueAPIName: 1,
@@ -192,6 +196,7 @@ var (
 		// P4: Poll APIs and other low priority APIs
 		"/temporal.api.workflowservice.v1.WorkflowService/PollNexusOperationExecution":        4,
 		"/temporal.api.workflowservice.v1.WorkflowService/PollActivityExecution":              4, // TODO(saa-preview): should it be 4 or 3?
+		PollStartNexusOperationAPIName:                                                        4,
 		"/temporal.api.workflowservice.v1.WorkflowService/PollWorkflowTaskQueue":              4,
 		"/temporal.api.workflowservice.v1.WorkflowService/PollActivityTaskQueue":              4,
 		"/temporal.api.workflowservice.v1.WorkflowService/PollWorkflowExecutionUpdate":        4,

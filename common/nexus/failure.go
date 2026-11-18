@@ -29,6 +29,10 @@ const (
 	FailureSourceHeaderName = "Temporal-Nexus-Failure-Source"
 	// FailureSourceWorker indicates the failure originated from outside the server (e.g. bad request or on the Nexus worker).
 	FailureSourceWorker = "worker"
+	// RetryableTrailerName is the gRPC trailer that tells callers of the direct StartNexusOperation and
+	// CancelNexusOperation APIs whether to retry a request that failed with a Nexus handler error ("true" or "false").
+	// It reflects the handler error's retry behavior, which the gRPC status code can't express.
+	RetryableTrailerName = "temporal-nexus-retryable"
 )
 
 type failureSourceContextKeyType struct{}

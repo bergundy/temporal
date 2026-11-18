@@ -18,6 +18,7 @@ import (
 	"go.temporal.io/server/common/log/tag"
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/namespace"
+	commonnexus "go.temporal.io/server/common/nexus"
 	"go.temporal.io/server/common/rpc/interceptor/logtags"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
@@ -166,9 +167,14 @@ func (a *Interceptor) Intercept(
 		if ok {
 			namespace = requestWithNamespace.GetNamespace()
 		}
+		apiName := info.FullMethod
+		// A direct call to a system Nexus operation is authorized as that operation rather than as StartNexusOperation.
+		if fullMethod, ok := commonnexus.SystemOperationFullMethod(req); ok {
+			apiName = fullMethod
+		}
 		ct := &CallTarget{
 			Namespace: namespace,
-			APIName:   info.FullMethod,
+			APIName:   apiName,
 			Request:   req,
 		}
 		principal, err := a.Authorize(ctx, claims, ct)

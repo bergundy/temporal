@@ -2,6 +2,7 @@ package callback
 
 import (
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	commonpb "go.temporal.io/api/common/v1"
@@ -199,5 +200,60 @@ func TestValidateAndAttach(t *testing.T) {
 		require.ErrorAs(t, err, new(*serviceerror.FailedPrecondition))
 		require.Len(t, host.callbacks, 1)
 		require.Equal(t, int64(1), host.metadata.GetTotalCallbacksCount())
+	})
+}
+
+func TestCancelCompletionCallbacks(t *testing.T) {
+	t.Parallel()
+
+	cancelTime := time.Now().UTC()
+	newCtx := func() *chasm.MockMutableContext {
+		return &chasm.MockMutableContext{MockContext: chasm.MockContext{
+			HandleNow: func(chasm.Component) time.Time { return cancelTime },
+		}}
+	}
+
+	t.Run("SchedulesTheRequestsStandbyCallbacks", func(t *testing.T) {
+		ctx := newCtx()
+		host := newFakeHost()
+		require.NoError(t, Attach(ctx, host, "req-1", timestamppb.Now(), nexusCallbacks("http://cb-1", "http://cb-2")))
+		require.NoError(t, Attach(ctx, host, "req-2", timestamppb.Now(), nexusCallbacks("http://cb-3")))
+
+		require.NoError(t, CancelCompletionCallbacks(ctx, host, "req-1"))
+		for idx := range 2 {
+			cb := host.callbacks[completionCallbackID("req-1", idx)].Get(ctx)
+			require.Equal(t, callbackspb.CALLBACK_STATUS_SCHEDULED, cb.GetStatus())
+			require.Equal(t, cancelTime, cb.GetCancelTime().AsTime())
+		}
+		require.Len(t, ctx.Tasks, 2)
+		other := host.callbacks[completionCallbackID("req-2", 0)].Get(ctx)
+		require.Equal(t, callbackspb.CALLBACK_STATUS_STANDBY, other.GetStatus())
+		require.Nil(t, other.GetCancelTime())
+	})
+
+	t.Run("ScheduledCallbacksDeliverTheCompletion", func(t *testing.T) {
+		ctx := newCtx()
+		host := newFakeHost()
+		require.NoError(t, Attach(ctx, host, "req-1", timestamppb.Now(), nexusCallbacks("http://cb-1")))
+		require.NoError(t, ScheduleCompletionCallbacks(ctx, host))
+		ctx.Tasks = nil
+
+		require.NoError(t, CancelCompletionCallbacks(ctx, host, "req-1"))
+		cb := host.callbacks[completionCallbackID("req-1", 0)].Get(ctx)
+		require.Equal(t, callbackspb.CALLBACK_STATUS_SCHEDULED, cb.GetStatus())
+		require.Nil(t, cb.GetCancelTime())
+		require.Empty(t, ctx.Tasks)
+	})
+
+	t.Run("UnknownRequestIsANoOp", func(t *testing.T) {
+		ctx := newCtx()
+		host := newFakeHost()
+		require.NoError(t, Attach(ctx, host, "req-1", timestamppb.Now(), nexusCallbacks("http://cb-1")))
+
+		require.NoError(t, CancelCompletionCallbacks(ctx, host, "req-2"))
+		require.NoError(t, CancelCompletionCallbacks(ctx, host, ""))
+		cb := host.callbacks[completionCallbackID("req-1", 0)].Get(ctx)
+		require.Equal(t, callbackspb.CALLBACK_STATUS_STANDBY, cb.GetStatus())
+		require.Empty(t, ctx.Tasks)
 	})
 }

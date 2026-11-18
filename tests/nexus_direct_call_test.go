@@ -18,6 +18,7 @@ import (
 	"go.temporal.io/api/workflowservice/v1"
 	"go.temporal.io/api/workflowservice/v1/workflowservicenexus"
 	"go.temporal.io/sdk/client"
+	"go.temporal.io/server/chasm"
 	"go.temporal.io/server/chasm/lib/activity"
 	"go.temporal.io/server/chasm/lib/callback"
 	"go.temporal.io/server/common/dynamicconfig"
@@ -27,6 +28,8 @@ import (
 	"go.temporal.io/server/common/testing/parallelsuite"
 	"go.temporal.io/server/common/testing/protorequire"
 	"go.temporal.io/server/tests/testcore"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
@@ -211,27 +214,21 @@ func (s *directNexusCallTestSuite) TestGetResult_FailsWhileWaiting() {
 	s.Equal(defaultFailure.GetMessage(), r.resp.GetFailure().GetCause().GetMessage(), "failure: %v", r.resp.GetFailure())
 }
 
-// TestGetResult_DetachesTheCallbackWhenDoneWaiting verifies that a request detaches its ephemeral callback when it stops
-// waiting, so that the callback doesn't count against the activity's limit.
-func (s *directNexusCallTestSuite) TestGetResult_DetachesTheCallbackWhenDoneWaiting() {
+// TestGetResult_PrunesTheCallbackOfARequestThatStoppedWaiting verifies that the ephemeral callback of a request that
+// stopped waiting doesn't count against the activity's limit.
+func (s *directNexusCallTestSuite) TestGetResult_PrunesTheCallbackOfARequestThatStoppedWaiting() {
 	env := s.newTestEnv()
-	constraints := dynamicconfig.Constraints{Namespace: env.Namespace().String()}
 	env.GetTestCluster().OverrideDynamicConfig(s.T(), callback.EphemeralMaxPerExecution, []dynamicconfig.ConstrainedValue{{
-		Constraints: constraints,
+		Constraints: dynamicconfig.Constraints{Namespace: env.Namespace().String()},
 		Value:       1,
-	}})
-	// Write updates that only change ephemeral callbacks, so that the test can tell when one is detached.
-	env.GetTestCluster().OverrideDynamicConfig(s.T(), dynamicconfig.EnableCHASMSkipCleanUpdates, []dynamicconfig.ConstrainedValue{{
-		Constraints: constraints,
-		Value:       false,
 	}})
 	activityID := testcore.RandomizeStr(s.T().Name())
 	taskQueue := testcore.RandomizeStr(s.T().Name())
 	env.startAndValidateActivity(s.Context(), s.T(), activityID, taskQueue)
 
 	// A request whose caller has a deadline times out its long poll in time to return the operation as still running.
-	// Its callback must have been detached, or the activity's limit would reject the next request's callback. A rejected
-	// request can't be retried to wait for the detach, since rejecting it reloads the activity, dropping its callbacks.
+	// It stops waiting for its callback before it returns, so the next request's callback replaces it rather than
+	// exceeding the limit.
 	requireTimesOut := func() {
 		ctx, cancel := context.WithTimeout(s.Context(), 3*time.Second)
 		defer cancel()
@@ -243,18 +240,33 @@ func (s *directNexusCallTestSuite) TestGetResult_DetachesTheCallbackWhenDoneWait
 		s.Require().NotNil(resp.GetAsyncSuccess(), "expected an async response, got %v", resp)
 	}
 	requireTimesOut()
-
-	// The caller of a request that's waiting goes away.
-	ctx, cancel := context.WithCancel(s.Context())
-	defer cancel()
-	resultCh := s.startWaiting(ctx, env, s.getResultRequest(env, activityID, uuid.NewString(), true))
-	transitions := s.stateTransitionCount(env, activityID)
-	cancel()
-	s.Require().ErrorAs((<-resultCh).err, new(*serviceerror.Canceled))
-	s.AwaitTruef(func() bool {
-		return s.stateTransitionCount(env, activityID) > transitions
-	}, 10*time.Second, 100*time.Millisecond, "the canceled request should detach its callback")
 	requireTimesOut()
+}
+
+func (s *directNexusCallTestSuite) TestGetResult_EphemeralCallbackRequiresSkipCleanUpdates() {
+	env := s.newTestEnv()
+	env.GetTestCluster().OverrideDynamicConfig(s.T(), dynamicconfig.EnableCHASMSkipCleanUpdates, []dynamicconfig.ConstrainedValue{{
+		Constraints: dynamicconfig.Constraints{Namespace: env.Namespace().String()},
+		Value:       false,
+	}})
+	activityID := testcore.RandomizeStr(s.T().Name())
+	taskQueue := testcore.RandomizeStr(s.T().Name())
+	env.startAndValidateActivity(s.Context(), s.T(), activityID, taskQueue)
+
+	_, err := env.FrontendClient().StartNexusOperation(
+		s.Context(),
+		s.getResultRequest(env, activityID, uuid.NewString(), true),
+	)
+	var unimplemented *serviceerror.Unimplemented
+	s.ErrorAs(err, &unimplemented)
+}
+
+func (s *directNexusCallTestSuite) TestHandlerErrorRetryableTrailer() {
+	env := s.newTestEnv()
+	var trailer metadata.MD
+	_, err := env.FrontendClient().CancelNexusOperation(s.Context(), s.cancelRequest(env, "invalid"), grpc.Trailer(&trailer))
+	s.requireHandlerFailure(err, nexus.HandlerErrorTypeBadRequest)
+	s.Equal([]string{"false"}, trailer.Get(commonnexus.RetryableTrailerName))
 }
 
 func (s *directNexusCallTestSuite) TestGetResult_AlreadyCompleted() {
@@ -337,47 +349,46 @@ func (s *directNexusCallTestSuite) TestGetResult_ActivityFailed() {
 	s.Equal(defaultFailure.GetMessage(), resp.GetFailure().GetCause().GetMessage(), "failure: %v", resp.GetFailure())
 }
 
-// TestGetResult_FromWorkflow verifies that a workflow can call the operation. Its durable callback delivers the
-// activity's completion, which is the operation's outcome.
-func (s *directNexusCallTestSuite) TestGetResult_FromWorkflow() {
-	env := s.newTestEnv()
-	activityID := testcore.RandomizeStr(s.T().Name())
-	taskQueue := testcore.RandomizeStr(s.T().Name())
-	startResp := env.startAndValidateActivity(s.Context(), s.T(), activityID, taskQueue)
+// callerWorkflow is a workflow that calls system Nexus operations. The test completes its workflow tasks directly.
+type callerWorkflow struct {
+	s         *directNexusCallTestSuite
+	env       *standaloneActivityEnv
+	taskQueue string
+}
 
-	callerTaskQueue := testcore.RandomizeStr(s.T().Name() + "-caller")
+func (s *directNexusCallTestSuite) startCallerWorkflow(env *standaloneActivityEnv) *callerWorkflow {
+	w := &callerWorkflow{s: s, env: env, taskQueue: testcore.RandomizeStr(s.T().Name() + "-caller")}
 	_, err := env.SdkClient().ExecuteWorkflow(s.Context(), client.StartWorkflowOptions{
-		TaskQueue: callerTaskQueue,
+		TaskQueue: w.taskQueue,
 	}, "caller-workflow")
 	s.Require().NoError(err)
-	pollWorkflowTask := func() *workflowservice.PollWorkflowTaskQueueResponse {
-		resp, err := env.FrontendClient().PollWorkflowTaskQueue(s.Context(), &workflowservice.PollWorkflowTaskQueueRequest{
-			Namespace: env.Namespace().String(),
-			TaskQueue: &taskqueuepb.TaskQueue{Name: callerTaskQueue, Kind: enumspb.TASK_QUEUE_KIND_NORMAL},
-			Identity:  "test",
-		})
-		s.Require().NoError(err)
-		s.Require().NotEmpty(resp.GetTaskToken())
-		return resp
-	}
-	respondWorkflowTask := func(task *workflowservice.PollWorkflowTaskQueueResponse, commands ...*commandpb.Command) {
-		_, err := env.FrontendClient().RespondWorkflowTaskCompleted(s.Context(), &workflowservice.RespondWorkflowTaskCompletedRequest{
-			Identity:  "test",
-			TaskToken: task.GetTaskToken(),
-			Commands:  commands,
-		})
-		s.Require().NoError(err)
-	}
-	findEvent := func(task *workflowservice.PollWorkflowTaskQueueResponse, eventType enumspb.EventType) *historypb.HistoryEvent {
-		for _, event := range task.GetHistory().GetEvents() {
-			if event.GetEventType() == eventType {
-				return event
-			}
-		}
-		return nil
-	}
+	return w
+}
 
-	respondWorkflowTask(pollWorkflowTask(), &commandpb.Command{
+func (w *callerWorkflow) pollTask() *workflowservice.PollWorkflowTaskQueueResponse {
+	resp, err := w.env.FrontendClient().PollWorkflowTaskQueue(w.s.Context(), &workflowservice.PollWorkflowTaskQueueRequest{
+		Namespace: w.env.Namespace().String(),
+		TaskQueue: &taskqueuepb.TaskQueue{Name: w.taskQueue, Kind: enumspb.TASK_QUEUE_KIND_NORMAL},
+		Identity:  "test",
+	})
+	w.s.Require().NoError(err)
+	w.s.Require().NotEmpty(resp.GetTaskToken())
+	return resp
+}
+
+func (w *callerWorkflow) respondTask(task *workflowservice.PollWorkflowTaskQueueResponse, commands ...*commandpb.Command) {
+	_, err := w.env.FrontendClient().RespondWorkflowTaskCompleted(w.s.Context(), &workflowservice.RespondWorkflowTaskCompletedRequest{
+		Identity:  "test",
+		TaskToken: task.GetTaskToken(),
+		Commands:  commands,
+	})
+	w.s.Require().NoError(err)
+}
+
+// scheduleGetResult has the workflow call the GetResult operation, and returns the task in which the operation
+// started.
+func (w *callerWorkflow) scheduleGetResult(activityID string) *workflowservice.PollWorkflowTaskQueueResponse {
+	w.respondTask(w.pollTask(), &commandpb.Command{
 		CommandType: enumspb.COMMAND_TYPE_SCHEDULE_NEXUS_OPERATION,
 		Attributes: &commandpb.Command_ScheduleNexusOperationCommandAttributes{
 			ScheduleNexusOperationCommandAttributes: &commandpb.ScheduleNexusOperationCommandAttributes{
@@ -388,17 +399,76 @@ func (s *directNexusCallTestSuite) TestGetResult_FromWorkflow() {
 			},
 		},
 	})
-
 	// The operation starts asynchronously because the activity is still running.
-	task := pollWorkflowTask()
-	s.Require().NotNil(findEvent(task, enumspb.EVENT_TYPE_NEXUS_OPERATION_STARTED), "history: %v", task.GetHistory())
-	respondWorkflowTask(task)
+	task := w.pollTask()
+	w.s.Require().NotNil(findHistoryEvent(task, enumspb.EVENT_TYPE_NEXUS_OPERATION_STARTED), "history: %v", task.GetHistory())
+	return task
+}
+
+func findHistoryEvent(task *workflowservice.PollWorkflowTaskQueueResponse, eventType enumspb.EventType) *historypb.HistoryEvent {
+	for _, event := range task.GetHistory().GetEvents() {
+		if event.GetEventType() == eventType {
+			return event
+		}
+	}
+	return nil
+}
+
+// TestGetResult_FromWorkflow verifies that a workflow can call the operation. Its durable callback delivers the
+// activity's completion, which is the operation's outcome.
+func (s *directNexusCallTestSuite) TestGetResult_FromWorkflow() {
+	env := s.newTestEnv()
+	activityID := testcore.RandomizeStr(s.T().Name())
+	taskQueue := testcore.RandomizeStr(s.T().Name())
+	startResp := env.startAndValidateActivity(s.Context(), s.T(), activityID, taskQueue)
+
+	caller := s.startCallerWorkflow(env)
+	caller.respondTask(caller.scheduleGetResult(activityID))
 
 	s.completeActivity(env, activityID, taskQueue, startResp.RunId)
-	task = pollWorkflowTask()
-	completed := findEvent(task, enumspb.EVENT_TYPE_NEXUS_OPERATION_COMPLETED)
+	task := caller.pollTask()
+	completed := findHistoryEvent(task, enumspb.EVENT_TYPE_NEXUS_OPERATION_COMPLETED)
 	s.Require().NotNil(completed, "history: %v", task.GetHistory())
 	protorequire.ProtoEqual(s.T(), defaultResult.GetPayloads()[0], completed.GetNexusOperationCompletedEventAttributes().GetResult())
+}
+
+// TestGetResult_CanceledFromWorkflow verifies that a workflow can cancel the operation without affecting the
+// activity: the operation's durable callback delivers a canceled outcome instead of the activity's completion.
+func (s *directNexusCallTestSuite) TestGetResult_CanceledFromWorkflow() {
+	env := s.newTestEnv()
+	activityID := testcore.RandomizeStr(s.T().Name())
+	taskQueue := testcore.RandomizeStr(s.T().Name())
+	env.startAndValidateActivity(s.Context(), s.T(), activityID, taskQueue)
+
+	caller := s.startCallerWorkflow(env)
+	task := caller.scheduleGetResult(activityID)
+	scheduled := findHistoryEvent(task, enumspb.EVENT_TYPE_NEXUS_OPERATION_SCHEDULED)
+	s.Require().NotNil(scheduled, "history: %v", task.GetHistory())
+	caller.respondTask(task, &commandpb.Command{
+		CommandType: enumspb.COMMAND_TYPE_REQUEST_CANCEL_NEXUS_OPERATION,
+		Attributes: &commandpb.Command_RequestCancelNexusOperationCommandAttributes{
+			RequestCancelNexusOperationCommandAttributes: &commandpb.RequestCancelNexusOperationCommandAttributes{
+				ScheduledEventId: scheduled.GetEventId(),
+			},
+		},
+	})
+
+	// The cancel request and the canceled outcome may be recorded in separate workflow tasks.
+	var canceled *historypb.HistoryEvent
+	for canceled == nil {
+		task = caller.pollTask()
+		canceled = findHistoryEvent(task, enumspb.EVENT_TYPE_NEXUS_OPERATION_CANCELED)
+		caller.respondTask(task)
+	}
+	failure := canceled.GetNexusOperationCanceledEventAttributes().GetFailure()
+	s.Require().NotNil(failure.GetCause().GetCanceledFailureInfo(), "failure: %v", failure)
+
+	describeResp, err := env.FrontendClient().DescribeActivityExecution(s.Context(), &workflowservice.DescribeActivityExecutionRequest{
+		Namespace:  env.Namespace().String(),
+		ActivityId: activityID,
+	})
+	s.Require().NoError(err)
+	s.Equal(enumspb.ACTIVITY_EXECUTION_STATUS_RUNNING, describeResp.GetInfo().GetStatus())
 }
 
 func (s *directNexusCallTestSuite) TestCancelNexusOperation() {
@@ -415,9 +485,20 @@ func (s *directNexusCallTestSuite) TestCancelNexusOperation() {
 	token := resp.GetAsyncSuccess().GetOperationToken()
 	s.Require().NotEmpty(token, "expected an async response, got %v", resp)
 
-	// The token routes the request to the activity's shard, where canceling the wait is a no-op.
+	// The token routes the request to the activity's shard. The operation has no durable callback to cancel, so
+	// canceling it is a no-op.
 	_, err = env.FrontendClient().CancelNexusOperation(s.Context(), s.cancelRequest(env, token))
 	s.NoError(err)
+
+	s.RunSequential("ActivityNotFound", func(s *directNexusCallTestSuite) {
+		token, err := chasm.NexusOperationToken[map[string]string]{
+			BusinessID: testcore.RandomizeStr(s.T().Name()),
+			Data:       map[string]string{"req": uuid.NewString()},
+		}.Encode()
+		s.Require().NoError(err)
+		_, err = env.FrontendClient().CancelNexusOperation(s.Context(), s.cancelRequest(env, token))
+		s.NoError(err)
+	})
 
 	s.RunSequential("InvalidToken", func(s *directNexusCallTestSuite) {
 		_, err := env.FrontendClient().CancelNexusOperation(s.Context(), s.cancelRequest(env, "invalid"))

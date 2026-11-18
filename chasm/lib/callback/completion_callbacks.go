@@ -246,6 +246,31 @@ func attachDurable(
 	return nil
 }
 
+// CancelCompletionCallbacks cancels the operation that the completion callbacks attached by [requestID] complete,
+// without affecting the [Holder]: each of them that's standing by is scheduled to deliver a canceled outcome instead
+// of the holder's completion. Callbacks that were already scheduled deliver the holder's completion, and it's a no-op
+// if the request attached no callbacks.
+func CancelCompletionCallbacks(ctx chasm.MutableContext, holder Holder, requestID string) error {
+	if requestID == "" {
+		return nil
+	}
+	cbs := holder.CompletionCallbacks()
+	for idx := 0; ; idx++ {
+		field, ok := cbs[completionCallbackID(requestID, idx)]
+		if !ok {
+			return nil
+		}
+		cb := field.Get(ctx)
+		if cb.Status != callbackspb.CALLBACK_STATUS_STANDBY {
+			continue
+		}
+		cb.CancelTime = timestamppb.New(ctx.Now(cb))
+		if err := TransitionScheduled.Apply(cb, ctx, EventScheduled{}); err != nil {
+			return err
+		}
+	}
+}
+
 // ScheduleCompletionCallbacks transitions all of the [Holder]s completion callbacks
 // state from STANDBY to SCHEDULED state, triggering their invocation.
 //

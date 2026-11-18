@@ -39,3 +39,15 @@ func IsLongPollDescribeNexusOperationExecutionRequest(
 	}
 	return false
 }
+
+// IsLongPollStartNexusOperationRequest reports whether req is a StartNexusOperation request that
+// carries an ephemeral completion callback, which holds it open until the operation completes.
+func IsLongPollStartNexusOperationRequest(
+	req any,
+) bool {
+	switch request := req.(type) {
+	case *workflowservice.StartNexusOperationRequest:
+		return request.GetCompletionCallback().GetEphemeral() != nil
+	}
+	return false
+}

@@ -37,7 +37,10 @@ message CallbackState {
   // request ID (to serve as an idempotency key). As well as the source request ID, to identify
   // when the callback was added (for buffered workflow event scenarios).
   string request_id = 9;
-}
+
+  // The time when the operation that the callback completes was canceled, without affecting the callback's source.
+  // If set, the callback delivers a canceled outcome instead of its source's completion.
+  google.protobuf.Timestamp cancel_time = 10;}
 
 // Status of a callback.
 enum CallbackStatus {

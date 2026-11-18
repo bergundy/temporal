@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/nexus-rpc/sdk-go/nexus"
 	"github.com/stretchr/testify/require"
 	callbackpb "go.temporal.io/api/callback/v1"
 	commonpb "go.temporal.io/api/common/v1"
@@ -16,6 +17,7 @@ import (
 	"go.temporal.io/server/common/definition"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/metrics"
+	commonnexus "go.temporal.io/server/common/nexus"
 	"go.temporal.io/server/common/testing/protorequire"
 	queueserrors "go.temporal.io/server/service/history/queues/errors"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -449,4 +451,29 @@ func TestToAPICallbackInfoReportsBlocked(t *testing.T) {
 			protorequire.ProtoEqual(t, want, info)
 		})
 	}
+}
+
+// A canceled callback delivers an outcome that callers classify as canceled, as they do a canceled source's completion.
+func TestCanceledCompletion(t *testing.T) {
+	registrationTime := time.Now().Add(-time.Minute).UTC()
+	cancelTime := time.Now().UTC()
+	cb := &Callback{
+		CallbackState: &callbackspb.CallbackState{
+			RegistrationTime: timestamppb.New(registrationTime),
+			CancelTime:       timestamppb.New(cancelTime),
+		},
+	}
+
+	completion, err := cb.canceledCompletion()
+	require.NoError(t, err)
+	require.Equal(t, registrationTime, completion.StartTime)
+	require.Equal(t, cancelTime, completion.CloseTime)
+	require.Nil(t, completion.Result)
+	require.NotNil(t, completion.Error)
+	require.Equal(t, nexus.OperationStateCanceled, completion.Error.State)
+
+	failure, err := commonnexus.OperationErrorToTemporalFailure(completion.Error)
+	require.NoError(t, err)
+	require.NotNil(t, failure.GetCanceledFailureInfo(), "failure: %v", failure)
+	require.Equal(t, "operation canceled", failure.GetMessage())
 }
