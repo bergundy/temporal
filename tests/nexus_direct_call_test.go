@@ -1,6 +1,7 @@
 package tests
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -153,35 +154,107 @@ func (s *directNexusCallTestSuite) completeActivity(env *standaloneActivityEnv, 
 	s.NoError(err)
 }
 
+type startNexusOperationResult struct {
+	resp *workflowservice.StartNexusOperationResponse
+	err  error
+}
+
+// startWaiting issues a request in the background and asserts that it's still waiting a second later.
+func (s *directNexusCallTestSuite) startWaiting(
+	ctx context.Context,
+	env *standaloneActivityEnv,
+	request *workflowservice.StartNexusOperationRequest,
+) <-chan startNexusOperationResult {
+	resultCh := make(chan startNexusOperationResult, 1)
+	go func() {
+		resp, err := env.FrontendClient().StartNexusOperation(ctx, request)
+		resultCh <- startNexusOperationResult{resp, err}
+	}()
+	select {
+	case r := <-resultCh:
+		s.FailNow("request returned instead of waiting", "response: %v, error: %v", r.resp, r.err)
+	case <-time.After(time.Second):
+	}
+	return resultCh
+}
+
 func (s *directNexusCallTestSuite) TestGetResult_CompletesWhileWaiting() {
 	env := s.newTestEnv()
 	activityID := testcore.RandomizeStr(s.T().Name())
 	taskQueue := testcore.RandomizeStr(s.T().Name())
 	startResp := env.startAndValidateActivity(s.Context(), s.T(), activityID, taskQueue)
-
-	type result struct {
-		resp *workflowservice.StartNexusOperationResponse
-		err  error
-	}
-	resultCh := make(chan result, 1)
-	go func() {
-		resp, err := env.FrontendClient().StartNexusOperation(
-			s.Context(),
-			s.getResultRequest(env, activityID, uuid.NewString(), true),
-		)
-		resultCh <- result{resp, err}
-	}()
-
-	select {
-	case r := <-resultCh:
-		s.FailNow("request returned before the activity completed", "response: %v, error: %v", r.resp, r.err)
-	case <-time.After(time.Second):
-	}
+	resultCh := s.startWaiting(s.Context(), env, s.getResultRequest(env, activityID, uuid.NewString(), true))
 
 	s.completeActivity(env, activityID, taskQueue, startResp.RunId)
 	r := <-resultCh
 	s.Require().NoError(r.err)
 	s.requireCompleted(env, r.resp, activityID, startResp.RunId)
+}
+
+func (s *directNexusCallTestSuite) TestGetResult_FailsWhileWaiting() {
+	env := s.newTestEnv()
+	activityID := testcore.RandomizeStr(s.T().Name())
+	taskQueue := testcore.RandomizeStr(s.T().Name())
+	startResp := env.startAndValidateActivity(s.Context(), s.T(), activityID, taskQueue)
+	resultCh := s.startWaiting(s.Context(), env, s.getResultRequest(env, activityID, uuid.NewString(), true))
+
+	task := env.pollActivityTaskAndValidate(s.Context(), s.T(), activityID, taskQueue, startResp.RunId)
+	_, err := env.FrontendClient().RespondActivityTaskFailed(s.Context(), &workflowservice.RespondActivityTaskFailedRequest{
+		Namespace: env.Namespace().String(),
+		TaskToken: task.TaskToken,
+		Failure:   defaultFailure,
+	})
+	s.Require().NoError(err)
+	r := <-resultCh
+	s.Require().NoError(r.err)
+	s.Require().NotNil(r.resp.GetFailure(), "expected a failure response, got %v", r.resp)
+	s.Equal(defaultFailure.GetMessage(), r.resp.GetFailure().GetCause().GetMessage(), "failure: %v", r.resp.GetFailure())
+}
+
+// TestGetResult_DetachesTheCallbackWhenDoneWaiting verifies that a request detaches its ephemeral callback when it stops
+// waiting, so that the callback doesn't count against the activity's limit.
+func (s *directNexusCallTestSuite) TestGetResult_DetachesTheCallbackWhenDoneWaiting() {
+	env := s.newTestEnv()
+	constraints := dynamicconfig.Constraints{Namespace: env.Namespace().String()}
+	env.GetTestCluster().OverrideDynamicConfig(s.T(), callback.EphemeralMaxPerExecution, []dynamicconfig.ConstrainedValue{{
+		Constraints: constraints,
+		Value:       1,
+	}})
+	// Write updates that only change ephemeral callbacks, so that the test can tell when one is detached.
+	env.GetTestCluster().OverrideDynamicConfig(s.T(), dynamicconfig.EnableCHASMSkipCleanUpdates, []dynamicconfig.ConstrainedValue{{
+		Constraints: constraints,
+		Value:       false,
+	}})
+	activityID := testcore.RandomizeStr(s.T().Name())
+	taskQueue := testcore.RandomizeStr(s.T().Name())
+	env.startAndValidateActivity(s.Context(), s.T(), activityID, taskQueue)
+
+	// A request whose caller has a deadline times out its long poll in time to return the operation as still running.
+	// Its callback must have been detached, or the activity's limit would reject the next request's callback. A rejected
+	// request can't be retried to wait for the detach, since rejecting it reloads the activity, dropping its callbacks.
+	requireTimesOut := func() {
+		ctx, cancel := context.WithTimeout(s.Context(), 3*time.Second)
+		defer cancel()
+		resp, err := env.FrontendClient().StartNexusOperation(
+			ctx,
+			s.getResultRequest(env, activityID, uuid.NewString(), true),
+		)
+		s.Require().NoError(err)
+		s.Require().NotNil(resp.GetAsyncSuccess(), "expected an async response, got %v", resp)
+	}
+	requireTimesOut()
+
+	// The caller of a request that's waiting goes away.
+	ctx, cancel := context.WithCancel(s.Context())
+	defer cancel()
+	resultCh := s.startWaiting(ctx, env, s.getResultRequest(env, activityID, uuid.NewString(), true))
+	transitions := s.stateTransitionCount(env, activityID)
+	cancel()
+	s.Require().ErrorAs((<-resultCh).err, new(*serviceerror.Canceled))
+	s.AwaitTruef(func() bool {
+		return s.stateTransitionCount(env, activityID) > transitions
+	}, 10*time.Second, 100*time.Millisecond, "the canceled request should detach its callback")
+	requireTimesOut()
 }
 
 func (s *directNexusCallTestSuite) TestGetResult_AlreadyCompleted() {

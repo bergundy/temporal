@@ -2579,23 +2579,23 @@ func (h *Handler) StartNexusOperation(
 
 // startNexusOperationWithEphemeralCallback holds a start request that carries an ephemeral callback open as a long
 // poll. The operation attaches the callback to the execution it waits on, as it would attach any callback. The callback
-// is scheduled when that execution completes, at which point the operation is started again to get its outcome
-// synchronously. If the long-poll deadline is reached first, the operation's async start is returned.
+// is scheduled when that execution completes, and the request returns the execution's Nexus completion, which is what a
+// durable callback delivers. If the long-poll deadline is reached first, the operation's async start is returned.
 func (h *Handler) startNexusOperationWithEphemeralCallback(
 	ctx context.Context,
 	nsEntry *namespace.Namespace,
 	req *historyservice.StartNexusOperationRequest,
 ) (*historyservice.StartNexusOperationResponse, error) {
 	options := h.callbackConfig.EphemeralOptions(nsEntry.Name().String())
-	ctx, cancel := contextutil.WithDeadlineBuffer(ctx, options.LongPollTimeout, options.LongPollBuffer)
+	pollCtx, cancel := contextutil.WithDeadlineBuffer(ctx, options.LongPollTimeout, options.LongPollBuffer)
 	defer cancel()
 
 	var pending *historyservice.StartNexusOperationResponse
 	for {
-		attemptCtx, registrar := callback.WithEphemeralRegistrar(ctx, options)
+		attemptCtx, registrar := callback.WithEphemeralRegistrar(pollCtx, options)
 		resp, err := h.startNexusOperation(attemptCtx, req)
 		if err != nil {
-			if pending != nil && ctx.Err() != nil {
+			if pending != nil && pollCtx.Err() != nil {
 				return pending, nil
 			}
 			return nil, err
@@ -2611,14 +2611,84 @@ func (h *Handler) startNexusOperationWithEphemeralCallback(
 			)
 		}
 		pending = resp
-		completed, err := registrar.Await(ctx)
+		completion, err := registrar.Await(pollCtx)
+		if errors.Is(err, callback.ErrEphemeralCallbackLost) {
+			// Start the operation again to attach a new callback, or get its outcome if it completed meanwhile.
+			continue
+		}
 		if err != nil {
 			return nil, err
 		}
-		if !completed {
+		if completion == nil {
+			// The request stopped waiting, so detach its callback rather than leave it until it's pruned.
+			if err := registrar.Detach(ctx); err != nil {
+				h.logger.Warn(
+					"failed to detach ephemeral callback",
+					tag.Error(err),
+					tag.WorkflowNamespaceID(req.GetNamespaceId()),
+					tag.RequestID(req.GetRequest().GetRequestId()),
+				)
+			}
 			return pending, nil
 		}
+		return h.startNexusOperationCompletionResponse(
+			*completion,
+			resp.GetResponse().GetAsyncSuccess().GetLinks(),
+			req.GetRequest().GetRequestId(),
+		)
 	}
+}
+
+// startNexusOperationCompletionResponse returns the outcome of an operation that completed asynchronously as a start
+// response, given the Nexus completion its callback receives and the links of its async start.
+func (h *Handler) startNexusOperationCompletionResponse(
+	completion nexusrpc.CompleteOperationOptions,
+	links []*nexuspb.Link,
+	requestID string,
+) (*historyservice.StartNexusOperationResponse, error) {
+	if completion.Error != nil {
+		return operationErrorStartResponse(completion.Error)
+	}
+	// Callbacks deliver a completion's result as is, and so does the response.
+	var payload *commonpb.Payload
+	switch result := completion.Result.(type) {
+	case nil:
+		// The operation has no result.
+	case *commonpb.Payload:
+		payload = result
+	default:
+		h.logger.Error(fmt.Sprintf("invalid completion result type: %T", result), tag.NexusStageHandlerInbound, tag.RequestID(requestID))
+		return nil, serviceerror.NewInternal("internal error (request ID: " + requestID + ")")
+	}
+	return &historyservice.StartNexusOperationResponse{
+		Response: &nexuspb.StartOperationResponse{
+			Variant: &nexuspb.StartOperationResponse_SyncSuccess{
+				SyncSuccess: &nexuspb.StartOperationResponse_Sync{
+					Payload: payload,
+					Links:   links,
+				},
+			},
+		},
+	}, nil
+}
+
+// operationErrorStartResponse returns the start response of an operation that failed or was canceled.
+func operationErrorStartResponse(opErr *nexus.OperationError) (*historyservice.StartNexusOperationResponse, error) {
+	nexusFailure, err := nexusrpc.DefaultFailureConverter().ErrorToFailure(opErr)
+	if err != nil {
+		return nil, err
+	}
+	temporalFailure, err := commonnexus.NexusFailureToTemporalFailure(nexusFailure)
+	if err != nil {
+		return nil, err
+	}
+	return &historyservice.StartNexusOperationResponse{
+		Response: &nexuspb.StartOperationResponse{
+			Variant: &nexuspb.StartOperationResponse_Failure{
+				Failure: temporalFailure,
+			},
+		},
+	}, nil
 }
 
 func (h *Handler) startNexusOperation(
@@ -2650,21 +2720,7 @@ func (h *Handler) startNexusOperation(
 	result, err := h.nexusHandler.StartOperation(ctx, req.GetRequest().GetService(), req.GetRequest().GetOperation(), input, options)
 	if err != nil {
 		if opErr, ok := errors.AsType[*nexus.OperationError](err); ok {
-			nexusFailure, convErr := nexusrpc.DefaultFailureConverter().ErrorToFailure(opErr)
-			if convErr != nil {
-				return nil, convErr
-			}
-			temporalFailure, convErr := commonnexus.NexusFailureToTemporalFailure(nexusFailure)
-			if convErr != nil {
-				return nil, convErr
-			}
-			return &historyservice.StartNexusOperationResponse{
-				Response: &nexuspb.StartOperationResponse{
-					Variant: &nexuspb.StartOperationResponse_Failure{
-						Failure: temporalFailure,
-					},
-				},
-			}, nil
+			return operationErrorStartResponse(opErr)
 		}
 		// TODO: redact certain errors
 		return nil, nexusHandlerErrorToServiceError(err)

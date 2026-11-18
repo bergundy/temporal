@@ -2,6 +2,7 @@ package callback
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 	"time"
@@ -13,15 +14,21 @@ import (
 	"go.temporal.io/server/chasm"
 	callbackspb "go.temporal.io/server/chasm/lib/callback/gen/callbackpb/v1"
 	commonnexus "go.temporal.io/server/common/nexus"
+	"go.temporal.io/server/common/nexus/nexusrpc"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // Ephemeral callbacks are attached by requests that wait for an operation's outcome themselves instead of having it
 // delivered. They arrive as Nexus callbacks with the reserved [commonnexus.EphemeralCallbackURL] and are attached as
 // ephemeral CHASM components, so they are never persisted or invoked. The host schedules them along with its other
-// completion callbacks, which tells the waiting request that the operation completed.
+// completion callbacks, at which point the waiting request reads the host's Nexus completion, i.e. what a durable
+// callback delivers.
 
 const ephemeralCallbackKeyPrefix = "ephemeral-"
+
+// ErrEphemeralCallbackLost is returned by [EphemeralRegistrar.Await] when the callback was lost while its host is still
+// open, e.g. because the execution was reloaded. The request must attach a new callback to keep waiting.
+var ErrEphemeralCallbackLost = errors.New("ephemeral callback lost")
 
 func isEphemeralAPICallback(cb *commonpb.Callback) bool {
 	return cb.GetNexus().GetUrl() == commonnexus.EphemeralCallbackURL
@@ -75,6 +82,8 @@ type EphemeralRegistrar struct {
 	hostRef []byte
 	// Key of the callback in the host's completion callbacks.
 	key string
+	// ID of the request that attached the callback.
+	requestID string
 }
 
 // WithEphemeralRegistrar returns a context that allows attaching an ephemeral callback, and the registrar that
@@ -89,25 +98,49 @@ func (r *EphemeralRegistrar) Registered() bool {
 	return r.hostRef != nil
 }
 
-// Await waits until the attached ephemeral callback is scheduled, which happens when its host completes. It also
-// returns true if the callback is lost, e.g. because the execution was reloaded. Either way, the request should be
-// handled again: the operation either completed or needs a new callback. It returns false if ctx is done first.
-func (r *EphemeralRegistrar) Await(ctx context.Context) (bool, error) {
-	_, _, err := chasm.PollComponent(ctx, r.hostRef, func(
-		host Holder,
+// Await waits until the attached ephemeral callback is scheduled, which happens when its host completes, and returns
+// the host's Nexus completion. It returns a nil completion if ctx is done first, and [ErrEphemeralCallbackLost] if the
+// callback was lost while its host is still open.
+func (r *EphemeralRegistrar) Await(ctx context.Context) (*nexusrpc.CompleteOperationOptions, error) {
+	completion, _, err := chasm.PollComponent(ctx, r.hostRef, func(
+		host Host,
 		chasmCtx chasm.Context,
-		key string,
-	) (struct{}, bool, error) {
-		field, ok := host.CompletionCallbacks()[key]
-		if !ok {
-			return struct{}{}, true, nil
+		registrar *EphemeralRegistrar,
+	) (*nexusrpc.CompleteOperationOptions, bool, error) {
+		if field, ok := host.CompletionCallbacks()[registrar.key]; ok {
+			if field.Get(chasmCtx).Status == callbackspb.CALLBACK_STATUS_STANDBY {
+				return nil, false, nil
+			}
+		} else if !host.LifecycleState(chasmCtx).IsClosed() {
+			return nil, false, ErrEphemeralCallbackLost
 		}
-		return struct{}{}, field.Get(chasmCtx).Status != callbackspb.CALLBACK_STATUS_STANDBY, nil
-	}, r.key)
+		completion, err := host.GetNexusCompletion(chasmCtx, registrar.requestID)
+		if err != nil {
+			return nil, false, err
+		}
+		return &completion, true, nil
+	}, r)
 	if err != nil && ctx.Err() != nil {
-		return false, nil
+		return nil, nil
 	}
-	return err == nil, err
+	return completion, err
+}
+
+// Detach removes the attached ephemeral callback once the request stops waiting for it, so that the callback doesn't
+// count against the host's limit until it's pruned. The request may have been canceled, so Detach ignores ctx's
+// cancellation, but it gives up after the long-poll buffer.
+func (r *EphemeralRegistrar) Detach(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.options.LongPollBuffer)
+	defer cancel()
+	_, _, err := chasm.UpdateComponent(ctx, r.hostRef, func(
+		host Holder,
+		_ chasm.MutableContext,
+		key string,
+	) (struct{}, error) {
+		delete(host.CompletionCallbacks(), key)
+		return struct{}{}, nil
+	}, r.key)
+	return err
 }
 
 func attachEphemeral(
@@ -178,5 +211,6 @@ func attachEphemeral(
 	)
 	registrar.hostRef = hostRef
 	registrar.key = key
+	registrar.requestID = requestID
 	return nil
 }
