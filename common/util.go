@@ -13,6 +13,7 @@ import (
 	"github.com/dgryski/go-farm"
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
+	errordetailspb "go.temporal.io/api/errordetails/v1"
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/api/workflowservice/v1"
 	deploymentspb "go.temporal.io/server/api/deployment/v1"
@@ -363,7 +364,7 @@ func IsServiceHandlerRetryableError(err error) bool {
 	switch err := err.(type) {
 	case *serviceerror.Internal,
 		*serviceerror.Unavailable:
-		return true
+		return !isNexusHandlerError(err)
 	case *serviceerror.MultiOperationExecution:
 		for _, opErr := range err.OperationErrors() {
 			if opErr != nil && IsServiceHandlerRetryableError(opErr) {
@@ -372,6 +373,17 @@ func IsServiceHandlerRetryableError(err error) bool {
 		}
 	}
 
+	return false
+}
+
+// isNexusHandlerError reports whether err carries a Nexus operation handler's error, which isn't retried by the server.
+// The caller decides whether to retry it, based on the handler error's retry behavior.
+func isNexusHandlerError(err error) bool {
+	for _, detail := range serviceerror.ToStatus(err).Details() {
+		if _, ok := detail.(*errordetailspb.NexusHandlerFailure); ok {
+			return true
+		}
+	}
 	return false
 }
 

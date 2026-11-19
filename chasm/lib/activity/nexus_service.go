@@ -194,7 +194,10 @@ func newActivityServiceNexusServiceProcessor(config *Config) *chasm.NexusService
 	sp := chasm.NewNexusServiceProcessor(activityServiceNexus.ServiceName)
 	sp.MustRegisterOperation(
 		activityServiceNexus.GetResult.Name(),
-		chasm.NewRegisterableNexusOperationProcessor(getResultProcessor{config: config}),
+		chasm.NewRegisterableNexusOperationProcessor(
+			getResultProcessor{config: config},
+			chasm.WithDirectCalls(config.EnableDirectGetResult),
+		),
 	)
 	return sp
 }

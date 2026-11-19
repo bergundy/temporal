@@ -350,7 +350,8 @@ func (e taskExecutor) executeInvocationTask(ctx context.Context, env hsm.Environ
 
 	err = e.saveResult(ctx, env, ref, result, callErr)
 
-	if callErr != nil && isDestinationDown(callErr) {
+	// The system endpoint is internal, so it's never considered down.
+	if callErr != nil && args.endpointName != commonnexus.SystemEndpoint && isDestinationDown(callErr) {
 		err = queueserrors.NewDestinationDownError(callErr.Error(), err)
 	}
 
@@ -863,7 +864,8 @@ func (e taskExecutor) executeCancelationTask(ctx context.Context, env hsm.Enviro
 
 	err = e.saveCancelationResult(ctx, env, ref, callErr, args.scheduledEventID)
 
-	if callErr != nil && isDestinationDown(callErr) {
+	// The system endpoint is internal, so it's never considered down.
+	if callErr != nil && args.endpointName != commonnexus.SystemEndpoint && isDestinationDown(callErr) {
 		err = queueserrors.NewDestinationDownError(callErr.Error(), err)
 	}
 
@@ -880,7 +882,6 @@ type cancelArgs struct {
 	scheduleToCloseTimeout                                         time.Duration
 	scheduledEventID                                               int64
 	headers                                                        map[string]string
-	payload                                                        *commonpb.Payload
 }
 
 // loadArgsForCancelation loads state from the operation state machine that's the parent of the cancelation machine the
@@ -919,7 +920,6 @@ func (e taskExecutor) loadArgsForCancelation(ctx context.Context, env hsm.Enviro
 		}
 		if attrs := event.GetNexusOperationScheduledEventAttributes(); attrs != nil {
 			args.headers = maps.Clone(attrs.GetNexusHeader())
-			args.payload = attrs.GetInput()
 		}
 		return nil
 	})
@@ -1130,7 +1130,6 @@ func (e taskExecutor) logCallFailure(traceCtx invocationTraceContext, callErr er
 }
 
 func isDestinationDown(err error) bool {
-	// For the system endpoint, we don't even consider the destination down since it's internal.
 	if _, ok := errors.AsType[serviceerror.ServiceError](err); ok {
 		return false
 	}
@@ -1245,7 +1244,8 @@ func (e taskExecutor) startOnHistoryService(
 		},
 	})
 	if err != nil {
-		return nil, err
+		// History returns the operation's handler errors as gRPC errors that carry them.
+		return nil, commonnexus.UnwrapHandlerError(err)
 	}
 
 	// Convert the response back to the expected format
@@ -1294,25 +1294,18 @@ func (e taskExecutor) cancelOnHistoryService(
 	ns *namespace.Namespace,
 	args cancelArgs,
 ) error {
-	res, err := e.ChasmRegistry.NexusEndpointProcessor.ProcessInput(chasm.NexusOperationProcessorContext{
-		Namespace: ns,
-		RequestID: args.requestID,
-		// Links are not needed for cancelation.
-	}, args.service, args.operation, args.payload)
-	if err != nil {
-		return fmt.Errorf("%w: %w", errOpProcessorFailed, err)
-	}
-
-	_, err = e.HistoryClient.CancelNexusOperation(ctx, &historyservice.CancelNexusOperationRequest{
+	routingKey := chasm.NexusOperationTokenRoutingKey(ns.ID().String(), args.token)
+	_, err := e.HistoryClient.CancelNexusOperation(ctx, &historyservice.CancelNexusOperationRequest{
 		NamespaceId: ns.ID().String(),
-		ShardId:     res.RoutingKey.ShardID(e.Config.NumHistoryShards),
+		ShardId:     routingKey.ShardID(e.Config.NumHistoryShards),
 		Request: &nexuspb.CancelOperationRequest{
 			Service:        args.service,
 			Operation:      args.operation,
 			OperationToken: args.token,
 		},
 	})
-	return err
+	// History returns the operation's handler errors as gRPC errors that carry them.
+	return commonnexus.UnwrapHandlerError(err)
 }
 
 func (e taskExecutor) startViaHTTP(

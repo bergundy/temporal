@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
+	errordetailspb "go.temporal.io/api/errordetails/v1"
 	failurepb "go.temporal.io/api/failure/v1"
 	historypb "go.temporal.io/api/history/v1"
 	"go.temporal.io/api/serviceerror"
@@ -248,6 +249,20 @@ func TestIsServiceClientTransientError_ResourceExhausted(t *testing.T) {
 			Message: "Mutable state cache is full",
 		},
 	))
+}
+
+func TestIsServiceHandlerRetryableError_NexusHandlerError(t *testing.T) {
+	for _, code := range []codes.Code{codes.Internal, codes.Unavailable} {
+		st, err := status.New(code, "handler error").WithDetails(&errordetailspb.NexusHandlerFailure{})
+		require.NoError(t, err)
+		handlerErr := serviceerror.FromStatus(st)
+		require.False(t, IsServiceHandlerRetryableError(handlerErr), code)
+		require.False(t, IsServiceClientTransientError(handlerErr), code)
+
+		otherErr := serviceerror.FromStatus(status.New(code, "other error"))
+		require.True(t, IsServiceHandlerRetryableError(otherErr), code)
+		require.True(t, IsServiceClientTransientError(otherErr), code)
+	}
 }
 
 func TestIsSystemResourceExhausted(t *testing.T) {

@@ -236,6 +236,8 @@ type Config struct {
 	WorkflowEnabledCallbackKinds dynamicconfig.TypedPropertyFnWithNamespaceFilter[[]callbacks.Kind]
 
 	MaxNexusOperationTokenLength   dynamicconfig.IntPropertyFnWithNamespaceFilter
+	MaxNexusServiceNameLength      dynamicconfig.IntPropertyFnWithNamespaceFilter
+	MaxNexusOperationNameLength    dynamicconfig.IntPropertyFnWithNamespaceFilter
 	NexusRequestHeadersBlacklist   dynamicconfig.TypedPropertyFn[*regexp.Regexp]
 	NexusForwardRequestUseEndpoint dynamicconfig.BoolPropertyFn
 	NexusOperationsMetricTagConfig dynamicconfig.TypedPropertyFn[chasmnexus.NexusMetricTagConfig]
@@ -438,6 +440,8 @@ func NewConfig(
 		CallbackHeaderMaxSize:          dynamicconfig.FrontendCallbackHeaderMaxSize.Get(dc),
 		MaxCallbacksPerWorkflow:        dynamicconfig.MaxCallbacksPerWorkflow.Get(dc),
 		MaxNexusOperationTokenLength:   nexusoperations.MaxOperationTokenLength.Get(dc),
+		MaxNexusServiceNameLength:      nexusoperations.MaxServiceNameLength.Get(dc),
+		MaxNexusOperationNameLength:    nexusoperations.MaxOperationNameLength.Get(dc),
 		NexusRequestHeadersBlacklist:   dynamicconfig.FrontendNexusRequestHeadersBlacklist.Get(dc),
 		NexusForwardRequestUseEndpoint: dynamicconfig.FrontendNexusForwardRequestUseEndpointDispatch.Get(dc),
 		NexusOperationsMetricTagConfig: nexusoperations.MetricTagConfiguration.Get(dc),

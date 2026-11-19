@@ -5,7 +5,6 @@ import (
 	"errors"
 	"strconv"
 
-	"github.com/google/uuid"
 	"github.com/nexus-rpc/sdk-go/nexus"
 	commonpb "go.temporal.io/api/common/v1"
 	nexuspb "go.temporal.io/api/nexus/v1"
@@ -31,7 +30,6 @@ func (wh *WorkflowHandler) StartNexusOperation(
 	request *workflowservice.StartNexusOperationRequest,
 ) (_ *workflowservice.StartNexusOperationResponse, retError error) {
 	defer log.CapturePanic(wh.logger, &retError)
-	defer func() { setRetryableTrailer(ctx, retError) }()
 
 	if request == nil {
 		return nil, errRequestNotSet
@@ -39,27 +37,14 @@ func (wh *WorkflowHandler) StartNexusOperation(
 	if !wh.config.EnableDirectNexusCalls(request.GetNamespace()) {
 		return nil, errDirectNexusCallsDisabled
 	}
-	err := validateDirectNexusRequest(
-		request.GetEndpoint(),
-		request.GetService(),
-		request.GetOperation(),
-		request.GetNexusHeader(),
-	)
-	if err != nil {
+	if err := wh.validateStartNexusOperationRequest(request); err != nil {
 		return nil, err
 	}
 	var callbackURL string
-	switch cb := request.GetCompletionCallback(); {
-	case cb == nil:
-	case cb.GetEphemeral() != nil:
+	if request.GetCompletionCallback() != nil {
 		callbackURL = commonnexus.EphemeralCallbackURL
-	default:
-		return nil, serviceerror.NewUnimplemented("only ephemeral completion callbacks are supported")
 	}
 	requestID := request.GetRequestId()
-	if requestID == "" {
-		requestID = uuid.NewString()
-	}
 	links := make([]*nexuspb.Link, 0, len(request.GetLinks()))
 	for _, link := range request.GetLinks() {
 		nexusLink, ok := temporalnexus.CommonLinkToNexusLink(link)
@@ -139,7 +124,6 @@ func (wh *WorkflowHandler) CancelNexusOperation(
 	request *workflowservice.CancelNexusOperationRequest,
 ) (_ *workflowservice.CancelNexusOperationResponse, retError error) {
 	defer log.CapturePanic(wh.logger, &retError)
-	defer func() { setRetryableTrailer(ctx, retError) }()
 
 	if request == nil {
 		return nil, errRequestNotSet
@@ -147,22 +131,10 @@ func (wh *WorkflowHandler) CancelNexusOperation(
 	if !wh.config.EnableDirectNexusCalls(request.GetNamespace()) {
 		return nil, errDirectNexusCallsDisabled
 	}
-	err := validateDirectNexusRequest(
-		request.GetEndpoint(),
-		request.GetService(),
-		request.GetOperation(),
-		request.GetNexusHeader(),
-	)
-	if err != nil {
+	if err := wh.validateCancelNexusOperationRequest(request); err != nil {
 		return nil, err
 	}
 	token := request.GetOperationToken()
-	if token == "" {
-		return nil, serviceerror.NewInvalidArgument("operation token is required")
-	}
-	if limit := wh.config.MaxNexusOperationTokenLength(request.GetNamespace()); len(token) > limit {
-		return nil, serviceerror.NewInvalidArgumentf("operation token length exceeds allowed limit (%d/%d)", len(token), limit)
-	}
 	ns, err := wh.namespaceRegistry.GetNamespace(namespace.Name(request.GetNamespace()))
 	if err != nil {
 		return nil, err
@@ -185,28 +157,110 @@ func (wh *WorkflowHandler) CancelNexusOperation(
 	return &workflowservice.CancelNexusOperationResponse{}, nil
 }
 
-// setRetryableTrailer tells the caller whether to retry a request that failed with a Nexus handler error, since the
-// gRPC status code doesn't reflect the handler error's retry behavior. It's a trailer because gRPC clients read retry
-// signals from trailers.
-func setRetryableTrailer(ctx context.Context, err error) {
-	handlerErr, ok := commonnexus.HandlerErrorFromServiceError(err)
-	if !ok {
-		return
+// NexusRetryableTrailerInterceptor tells callers of the direct StartNexusOperation and CancelNexusOperation APIs
+// whether to retry a request that failed with a Nexus handler error, since the gRPC status code doesn't reflect the
+// handler error's retry behavior. It sets a trailer because gRPC clients read retry signals from trailers. It must run
+// outside the redirection and retry interceptors, so that the trailer describes the final error, including one returned
+// by another cluster, and inside the error masking interceptor, which drops the handler error from internal errors.
+func NexusRetryableTrailerInterceptor(
+	ctx context.Context,
+	req any,
+	info *grpc.UnaryServerInfo,
+	handler grpc.UnaryHandler,
+) (any, error) {
+	resp, err := handler(ctx, req)
+	if info.FullMethod != workflowservice.WorkflowService_StartNexusOperation_FullMethodName &&
+		info.FullMethod != workflowservice.WorkflowService_CancelNexusOperation_FullMethodName {
+		return resp, err
 	}
-	_ = grpc.SetTrailer(ctx, metadata.Pairs(commonnexus.RetryableTrailerName, strconv.FormatBool(handlerErr.Retryable())))
+	if handlerErr, ok := commonnexus.HandlerErrorFromServiceError(err); ok {
+		retryable := strconv.FormatBool(handlerErr.Retryable())
+		_ = grpc.SetTrailer(ctx, metadata.Pairs(commonnexus.RetryableTrailerName, retryable))
+	}
+	return resp, err
 }
 
-func validateDirectNexusRequest(endpoint, service, operation string, header map[string]string) error {
+// validateStartNexusOperationRequest validates a direct start request, and generates its request ID if it isn't set.
+func (wh *WorkflowHandler) validateStartNexusOperationRequest(request *workflowservice.StartNexusOperationRequest) error {
+	namespaceName := request.GetNamespace()
+	err := wh.validateDirectNexusTarget(
+		namespaceName,
+		request.GetEndpoint(),
+		request.GetService(),
+		request.GetOperation(),
+		request.GetNexusHeader(),
+	)
+	if err != nil {
+		return err
+	}
+	if len(request.GetIdentity()) > wh.config.MaxIDLengthLimit() {
+		return errIdentityTooLong
+	}
+	if err := validateRequestId(&request.RequestId, wh.config.MaxIDLengthLimit()); err != nil {
+		return err
+	}
+	if size, limit := request.GetInput().Size(), wh.config.BlobSizeLimitError(namespaceName); size > limit {
+		return serviceerror.NewInvalidArgumentf("input exceeds size limit. Length=%d Limit=%d", size, limit)
+	}
+	if cb := request.GetCompletionCallback(); cb != nil && cb.GetEphemeral() == nil {
+		return serviceerror.NewUnimplemented("only ephemeral completion callbacks are supported")
+	}
+	return wh.linkValidator.Validate(namespaceName, request.GetLinks(), nil)
+}
+
+// validateCancelNexusOperationRequest validates a direct cancel request.
+func (wh *WorkflowHandler) validateCancelNexusOperationRequest(request *workflowservice.CancelNexusOperationRequest) error {
+	namespaceName := request.GetNamespace()
+	err := wh.validateDirectNexusTarget(
+		namespaceName,
+		request.GetEndpoint(),
+		request.GetService(),
+		request.GetOperation(),
+		request.GetNexusHeader(),
+	)
+	if err != nil {
+		return err
+	}
+	if len(request.GetIdentity()) > wh.config.MaxIDLengthLimit() {
+		return errIdentityTooLong
+	}
+	token := request.GetOperationToken()
+	if token == "" {
+		return serviceerror.NewInvalidArgument("operation token is required")
+	}
+	if limit := wh.config.MaxNexusOperationTokenLength(namespaceName); len(token) > limit {
+		return serviceerror.NewInvalidArgumentf("operation token length exceeds allowed limit (%d/%d)", len(token), limit)
+	}
+	return nil
+}
+
+// validateDirectNexusTarget validates the operation a direct call targets, and checks that it can be called directly.
+func (wh *WorkflowHandler) validateDirectNexusTarget(
+	namespaceName string,
+	endpoint string,
+	service string,
+	operation string,
+	header map[string]string,
+) error {
 	if endpoint != commonnexus.SystemEndpoint {
 		return serviceerror.NewUnimplemented("direct Nexus calls only support the system Nexus endpoint")
 	}
-	if service == "" || operation == "" {
-		return serviceerror.NewInvalidArgument("service and operation are required")
+	if service == "" {
+		return serviceerror.NewInvalidArgument("service is required")
+	}
+	if limit := wh.config.MaxNexusServiceNameLength(namespaceName); len(service) > limit {
+		return serviceerror.NewInvalidArgumentf("service exceeds length limit. Length=%d Limit=%d", len(service), limit)
+	}
+	if operation == "" {
+		return serviceerror.NewInvalidArgument("operation is required")
+	}
+	if limit := wh.config.MaxNexusOperationNameLength(namespaceName); len(operation) > limit {
+		return serviceerror.NewInvalidArgumentf("operation exceeds length limit. Length=%d Limit=%d", len(operation), limit)
 	}
 	if len(header) > 0 {
 		return serviceerror.NewInvalidArgument("Nexus headers are not supported for the system Nexus endpoint")
 	}
-	return nil
+	return wh.registry.NexusEndpointProcessor.CheckDirectCall(namespaceName, service, operation)
 }
 
 func nexusLinksToCommonLinks(links []*nexuspb.Link) []*commonpb.Link {

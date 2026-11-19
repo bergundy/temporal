@@ -546,6 +546,15 @@ func HandlerErrorFromServiceError(err error) (*nexus.HandlerError, bool) {
 	return nil, false
 }
 
+// UnwrapHandlerError returns the Nexus handler error carried by an error created with HandlerErrorToServiceError, or
+// err itself if it doesn't carry one.
+func UnwrapHandlerError(err error) error {
+	if handlerErr, ok := HandlerErrorFromServiceError(err); ok {
+		return handlerErr
+	}
+	return err
+}
+
 // handlerErrorTypeToCode is the inverse of the mapping in ConvertGRPCError.
 func handlerErrorTypeToCode(t nexus.HandlerErrorType) codes.Code {
 	switch t {

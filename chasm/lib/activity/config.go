@@ -54,6 +54,13 @@ var (
 Only consulted when activity.enableCallbacks is set.`,
 	)
 
+	EnableDirectGetResult = dynamicconfig.NewNamespaceBoolSetting(
+		"activity.enableDirectGetResult",
+		false,
+		`Allows calling the ActivityService.GetResult system Nexus operation directly, outside a workflow, via the
+StartNexusOperation and CancelNexusOperation APIs. Direct calls also require frontend.enableDirectNexusCalls.`,
+	)
+
 	EnableStandaloneActivityOperatorCommands = dynamicconfig.NewNamespaceBoolSetting(
 		"history.enableStandaloneActivityOperatorCommands",
 		false,
@@ -68,6 +75,7 @@ type Config struct {
 	EnableCallbacks                           dynamicconfig.BoolPropertyFnWithNamespaceFilter
 	EnableActivityEagerDispatchCheck          dynamicconfig.BoolPropertyFnWithNamespaceFilter
 	EnableCancelActivityWorkerCommand         dynamicconfig.BoolPropertyFnWithNamespaceFilter
+	EnableDirectGetResult                     dynamicconfig.BoolPropertyFnWithNamespaceFilter
 	EnabledCallbackKinds                      dynamicconfig.TypedPropertyFnWithNamespaceFilter[[]callbacks.Kind]
 	Enabled                                   dynamicconfig.BoolPropertyFnWithNamespaceFilter
 	EnableEagerStart                          dynamicconfig.BoolPropertyFnWithNamespaceFilter
@@ -92,6 +100,7 @@ func ConfigProvider(dc *dynamicconfig.Collection) *Config {
 		EnableActivityEagerDispatchCheck:          dynamicconfig.EnableActivityEagerDispatchCheck.Get(dc),
 		EnableCallbacks:                           EnableCallbacks.Get(dc),
 		EnableCancelActivityWorkerCommand:         dynamicconfig.EnableCancelActivityWorkerCommand.Get(dc),
+		EnableDirectGetResult:                     EnableDirectGetResult.Get(dc),
 		EnabledCallbackKinds:                      EnabledCallbackKinds.Get(dc),
 		Enabled:                                   Enabled.Get(dc),
 		EnableEagerStart:                          EnableEagerStart.Get(dc),

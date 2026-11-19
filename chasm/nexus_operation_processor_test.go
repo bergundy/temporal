@@ -6,6 +6,7 @@ import (
 	"github.com/nexus-rpc/sdk-go/nexus"
 	"github.com/stretchr/testify/require"
 	commonpb "go.temporal.io/api/common/v1"
+	"go.temporal.io/api/serviceerror"
 	persistencespb "go.temporal.io/server/api/persistence/v1"
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/payloads"
@@ -227,6 +228,70 @@ func TestNexusEndpointProcessor_ProcessInput(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := processor.ProcessInput(ctx, tt.service, tt.operation, tt.input)
 			tt.checkResult(t, result, err)
+		})
+	}
+}
+
+func TestNexusEndpointProcessor_CheckDirectCall(t *testing.T) {
+	t.Parallel()
+
+	serviceProcessor := NewNexusServiceProcessor("test-service")
+	serviceProcessor.MustRegisterOperation("workflow-only", NewRegisterableNexusOperationProcessor(&processableOperation{}))
+	serviceProcessor.MustRegisterOperation("direct", NewRegisterableNexusOperationProcessor(
+		&processableOperation{},
+		WithDirectCalls(func(namespaceName string) bool { return namespaceName == "enabled-namespace" }),
+	))
+	processor := NewNexusEndpointProcessor()
+	processor.MustRegisterServiceProcessor(serviceProcessor)
+
+	tests := []struct {
+		name          string
+		namespaceName string
+		service       string
+		operation     string
+		errContains   string
+	}{
+		{name: "enabled", namespaceName: "enabled-namespace", service: "test-service", operation: "direct"},
+		{
+			name:          "disabled in namespace",
+			namespaceName: "other-namespace",
+			service:       "test-service",
+			operation:     "direct",
+			errContains:   "direct calls to test-service/direct are disabled",
+		},
+		{
+			name:          "not callable directly",
+			namespaceName: "enabled-namespace",
+			service:       "test-service",
+			operation:     "workflow-only",
+			errContains:   "test-service/workflow-only can't be called directly",
+		},
+		{
+			name:          "operation not found",
+			namespaceName: "enabled-namespace",
+			service:       "test-service",
+			operation:     "nonexistent-operation",
+			errContains:   "can't be called directly",
+		},
+		{
+			name:          "service not found",
+			namespaceName: "enabled-namespace",
+			service:       "nonexistent-service",
+			operation:     "direct",
+			errContains:   "can't be called directly",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := processor.CheckDirectCall(tt.namespaceName, tt.service, tt.operation)
+			if tt.errContains == "" {
+				require.NoError(t, err)
+				return
+			}
+			var unimplemented *serviceerror.Unimplemented
+			require.ErrorAs(t, err, &unimplemented)
+			require.ErrorContains(t, err, tt.errContains)
 		})
 	}
 }

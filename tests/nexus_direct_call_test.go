@@ -2,6 +2,7 @@ package tests
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -54,6 +55,7 @@ func (s *directNexusCallTestSuite) newTestEnv(opts ...testcore.TestOption) *stan
 	cluster.OverrideDynamicConfig(s.T(), activity.Enabled, enabled)
 	cluster.OverrideDynamicConfig(s.T(), activity.EnableCallbacks, enabled)
 	cluster.OverrideDynamicConfig(s.T(), dynamicconfig.FrontendEnableDirectNexusCalls, enabled)
+	cluster.OverrideDynamicConfig(s.T(), activity.EnableDirectGetResult, enabled)
 	cluster.OverrideDynamicConfig(s.T(), dynamicconfig.EnableCHASMSkipCleanUpdates, enabled)
 	return env
 }
@@ -545,9 +547,59 @@ func (s *directNexusCallTestSuite) TestValidation() {
 		request := s.getResultRequest(env, activityID, uuid.NewString(), true)
 		request.Operation = "Unknown"
 		_, err := env.FrontendClient().StartNexusOperation(s.Context(), request)
-		var notFound *serviceerror.NotFound
-		s.ErrorAs(err, &notFound)
-		s.requireHandlerFailure(err, nexus.HandlerErrorTypeNotFound)
+		var unimplemented *serviceerror.Unimplemented
+		s.ErrorAs(err, &unimplemented)
+		s.ErrorContains(err, "can't be called directly")
+	})
+
+	s.RunSequential("OperationNotCallableDirectly", func(s *directNexusCallTestSuite) {
+		request := s.getResultRequest(env, activityID, uuid.NewString(), true)
+		request.Service = "temporal.api.workflowservice.v1.WorkflowService"
+		request.Operation = "SignalWithStartWorkflowExecution"
+		_, err := env.FrontendClient().StartNexusOperation(s.Context(), request)
+		var unimplemented *serviceerror.Unimplemented
+		s.ErrorAs(err, &unimplemented)
+		s.ErrorContains(err, "can't be called directly")
+	})
+
+	s.RunSequential("RequestIDTooLong", func(s *directNexusCallTestSuite) {
+		request := s.getResultRequest(env, activityID, strings.Repeat("x", 1001), true)
+		_, err := env.FrontendClient().StartNexusOperation(s.Context(), request)
+		var invalidArgument *serviceerror.InvalidArgument
+		s.ErrorAs(err, &invalidArgument)
+	})
+
+	s.RunSequential("OperationNameTooLong", func(s *directNexusCallTestSuite) {
+		request := s.getResultRequest(env, activityID, uuid.NewString(), true)
+		request.Operation = strings.Repeat("x", 1001)
+		_, err := env.FrontendClient().StartNexusOperation(s.Context(), request)
+		var invalidArgument *serviceerror.InvalidArgument
+		s.ErrorAs(err, &invalidArgument)
+	})
+
+	s.RunSequential("CancelIdentityTooLong", func(s *directNexusCallTestSuite) {
+		request := s.cancelRequest(env, "token")
+		request.Identity = strings.Repeat("x", 1001)
+		_, err := env.FrontendClient().CancelNexusOperation(s.Context(), request)
+		var invalidArgument *serviceerror.InvalidArgument
+		s.ErrorAs(err, &invalidArgument)
+	})
+
+	s.RunSequential("OperationDisabled", func(s *directNexusCallTestSuite) {
+		env.GetTestCluster().OverrideDynamicConfig(s.T(), activity.EnableDirectGetResult, []dynamicconfig.ConstrainedValue{{
+			Constraints: dynamicconfig.Constraints{Namespace: env.Namespace().String()},
+			Value:       false,
+		}})
+		_, err := env.FrontendClient().StartNexusOperation(
+			s.Context(),
+			s.getResultRequest(env, activityID, uuid.NewString(), true),
+		)
+		var unimplemented *serviceerror.Unimplemented
+		s.ErrorAs(err, &unimplemented)
+		s.ErrorContains(err, "are disabled")
+
+		_, err = env.FrontendClient().CancelNexusOperation(s.Context(), s.cancelRequest(env, "token"))
+		s.ErrorAs(err, &unimplemented)
 	})
 
 	s.RunSequential("Disabled", func(s *directNexusCallTestSuite) {

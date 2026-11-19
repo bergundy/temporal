@@ -323,6 +323,8 @@ func GrpcServerOptionsProvider(
 		// Handover interceptor has to above redirection because the request will route to the correct cluster after handover completed.
 		// And retry cannot be performed before customInterceptors.
 		namespaceHandoverInterceptor.Intercept,
+		// Must be outside redirection and retries, so the trailer it sets describes the final error.
+		NexusRetryableTrailerInterceptor,
 		redirectionInterceptor.Intercept,
 		// Keep this outside telemetry so error metrics see the original limiter errors.
 		retryDelayFloorInterceptor.Intercept,

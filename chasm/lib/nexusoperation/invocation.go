@@ -247,7 +247,7 @@ func (i *invocationSystem) Start(
 		},
 	})
 	if err != nil {
-		return nil, unwrapSystemHandlerError(err)
+		return nil, commonnexus.UnwrapHandlerError(err)
 	}
 
 	result := &nexusrpc.ClientStartOperationResponse[*commonpb.Payload]{}
@@ -303,13 +303,5 @@ func (i *invocationSystem) Cancel(
 			OperationToken: args.token,
 		},
 	})
-	return unwrapSystemHandlerError(err)
-}
-
-// unwrapSystemHandlerError restores the Nexus handler errors that the history service returns as gRPC errors.
-func unwrapSystemHandlerError(err error) error {
-	if handlerErr, ok := commonnexus.HandlerErrorFromServiceError(err); ok {
-		return handlerErr
-	}
-	return err
+	return commonnexus.UnwrapHandlerError(err)
 }

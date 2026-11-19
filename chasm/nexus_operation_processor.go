@@ -6,6 +6,7 @@ import (
 
 	"github.com/nexus-rpc/sdk-go/nexus"
 	commonpb "go.temporal.io/api/common/v1"
+	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/namespace"
 	sdkconverter "go.temporal.io/server/common/sdk"
@@ -76,6 +77,21 @@ type NexusOperationProcessor[I any] interface {
 // and invocation within a service processor.
 type RegisterableNexusOperationProcessor struct {
 	processInput func(ctx NexusOperationProcessorContext, input *commonpb.Payload) (*NexusOperationProcessorResult, error)
+	// directCallsEnabled reports whether the operation can be called directly in a namespace. It's nil if the operation
+	// can't be called directly.
+	directCallsEnabled func(namespaceName string) bool
+}
+
+// NexusOperationProcessorOption configures a [RegisterableNexusOperationProcessor].
+type NexusOperationProcessorOption func(*RegisterableNexusOperationProcessor)
+
+// WithDirectCalls lets callers outside a workflow call the operation directly, via the StartNexusOperation and
+// CancelNexusOperation APIs, in the namespaces where enabled returns true. Operations can't be called directly by
+// default.
+func WithDirectCalls(enabled func(namespaceName string) bool) NexusOperationProcessorOption {
+	return func(p *RegisterableNexusOperationProcessor) {
+		p.directCallsEnabled = enabled
+	}
 }
 
 func nexusOperationProcessorAdapter[I any](processor NexusOperationProcessor[I]) func(ctx NexusOperationProcessorContext, input *commonpb.Payload) (*NexusOperationProcessorResult, error) {
@@ -104,10 +120,17 @@ func nexusOperationProcessorAdapter[I any](processor NexusOperationProcessor[I])
 }
 
 // NewRegisterableNexusOperationProcessor wraps a typed NexusOperationProcessor and returns a registerable adapter.
-func NewRegisterableNexusOperationProcessor[I any](op NexusOperationProcessor[I]) RegisterableNexusOperationProcessor {
-	return RegisterableNexusOperationProcessor{
+func NewRegisterableNexusOperationProcessor[I any](
+	op NexusOperationProcessor[I],
+	opts ...NexusOperationProcessorOption,
+) RegisterableNexusOperationProcessor {
+	p := RegisterableNexusOperationProcessor{
 		processInput: nexusOperationProcessorAdapter(op),
 	}
+	for _, opt := range opts {
+		opt(&p)
+	}
+	return p
 }
 
 // NexusServiceProcessor handles input processing for operations within a specific Nexus service.
@@ -198,4 +221,20 @@ func (p *NexusEndpointProcessor) ProcessInput(ctx NexusOperationProcessorContext
 		return nil, nexus.NewHandlerErrorf(nexus.HandlerErrorTypeNotFound, "service %q not found", service)
 	}
 	return serviceProcessor.ProcessInput(ctx, operation, input)
+}
+
+// CheckDirectCall returns an Unimplemented error unless the operation can be called directly, outside a workflow, in
+// the namespace (see [WithDirectCalls]).
+func (p *NexusEndpointProcessor) CheckDirectCall(namespaceName, service, operation string) error {
+	var op RegisterableNexusOperationProcessor
+	if serviceProcessor, ok := p.serviceProcessors[service]; ok {
+		op = serviceProcessor.operations[operation]
+	}
+	if op.directCallsEnabled == nil {
+		return serviceerror.NewUnimplementedf("%s/%s can't be called directly", service, operation)
+	}
+	if !op.directCallsEnabled(namespaceName) {
+		return serviceerror.NewUnimplementedf("direct calls to %s/%s are disabled", service, operation)
+	}
+	return nil
 }
