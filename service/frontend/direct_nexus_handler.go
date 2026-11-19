@@ -242,7 +242,7 @@ func (wh *WorkflowHandler) validateDirectNexusTarget(
 	operation string,
 	header map[string]string,
 ) error {
-	if endpoint != commonnexus.SystemEndpoint {
+	if commonnexus.DirectCallEndpoint(endpoint) != commonnexus.SystemEndpoint {
 		return serviceerror.NewUnimplemented("direct Nexus calls only support the system Nexus endpoint")
 	}
 	if service == "" {

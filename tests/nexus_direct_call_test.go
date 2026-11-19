@@ -1,7 +1,11 @@
 package tests
 
 import (
+	"bytes"
 	"context"
+	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -31,6 +35,7 @@ import (
 	"go.temporal.io/server/tests/testcore"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
@@ -286,6 +291,49 @@ func (s *directNexusCallTestSuite) TestGetResult_AlreadyCompleted() {
 	s.Require().NoError(err)
 	s.requireCompleted(env, resp, activityID, startResp.RunId)
 	s.Equal(transitions, s.stateTransitionCount(env, activityID), "getting a closed activity's result shouldn't write it")
+}
+
+func (s *directNexusCallTestSuite) TestGetResult_HTTPNamespaceRoute() {
+	for _, prefix := range []string{"", "/api/v1"} {
+		s.Run("Prefix="+prefix, func(s *directNexusCallTestSuite) {
+			env := s.newTestEnv()
+			activityID := testcore.RandomizeStr(s.T().Name())
+			taskQueue := testcore.RandomizeStr(s.T().Name())
+			startResp := env.startAndValidateActivity(s.Context(), s.T(), activityID, taskQueue)
+			s.completeActivity(env, activityID, taskQueue, startResp.RunId)
+
+			// The namespace-scoped route has no endpoint in its path, the system endpoint is inferred.
+			request := s.getResultRequest(env, activityID, uuid.NewString(), true)
+			request.Namespace = ""
+			request.Endpoint = ""
+			request.Service = ""
+			request.Operation = ""
+			body, err := protojson.Marshal(request)
+			s.Require().NoError(err)
+			url := fmt.Sprintf(
+				"http://%s%s/nexus-requests/namespaces/%s/services/%s/operations/%s",
+				env.HttpAPIAddress(),
+				prefix,
+				env.Namespace().String(),
+				activityServiceNexus.ServiceName,
+				activityServiceNexus.GetResult.Name(),
+			)
+			httpReq, err := http.NewRequestWithContext(s.Context(), http.MethodPost, url, bytes.NewReader(body))
+			s.Require().NoError(err)
+			httpReq.Header.Set("Content-Type", "application/json+no-payload-shorthand")
+			httpReq.Header.Set("Accept", "application/json+no-payload-shorthand")
+			httpResp, err := http.DefaultClient.Do(httpReq)
+			s.Require().NoError(err)
+			respBody, err := io.ReadAll(httpResp.Body)
+			_ = httpResp.Body.Close()
+			s.Require().NoError(err)
+			s.Require().Equal(http.StatusOK, httpResp.StatusCode, "body: %s", respBody)
+
+			var resp workflowservice.StartNexusOperationResponse
+			s.Require().NoError(protojson.Unmarshal(respBody, &resp), string(respBody))
+			s.requireCompleted(env, &resp, activityID, startResp.RunId)
+		})
+	}
 }
 
 func (s *directNexusCallTestSuite) TestGetResult_LongPollTimeout() {

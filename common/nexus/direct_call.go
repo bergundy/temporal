@@ -10,8 +10,17 @@ import (
 // concurrency limits and metering identify such calls by this name instead of StartNexusOperation.
 func SystemOperationFullMethod(req any) (string, bool) {
 	request, ok := req.(*workflowservice.StartNexusOperationRequest)
-	if !ok || request.GetEndpoint() != SystemEndpoint {
+	if !ok || DirectCallEndpoint(request.GetEndpoint()) != SystemEndpoint {
 		return "", false
 	}
 	return api.SystemNexusOperationFullMethod(request.GetService(), request.GetOperation())
+}
+
+// DirectCallEndpoint returns the endpoint a direct StartNexusOperation or CancelNexusOperation call targets. An empty
+// endpoint targets the system Nexus endpoint, e.g. via the namespace-scoped HTTP routes.
+func DirectCallEndpoint(endpoint string) string {
+	if endpoint == "" {
+		return SystemEndpoint
+	}
+	return endpoint
 }
