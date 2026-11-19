@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/nexus-rpc/sdk-go/nexus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -54,6 +55,7 @@ import (
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/metrics/metricstest"
 	"go.temporal.io/server/common/namespace"
+	commonnexus "go.temporal.io/server/common/nexus"
 	"go.temporal.io/server/common/payload"
 	"go.temporal.io/server/common/payloads"
 	"go.temporal.io/server/common/persistence"
@@ -70,6 +72,7 @@ import (
 	"go.temporal.io/server/common/tasktoken"
 	test "go.temporal.io/server/common/testing"
 	"go.temporal.io/server/common/testing/protorequire"
+	"go.temporal.io/server/common/testing/rpctest"
 	"go.temporal.io/server/common/tqid"
 	"go.temporal.io/server/common/wideevents"
 	"go.temporal.io/server/service/history/api"
@@ -7098,6 +7101,78 @@ func (s *WorkflowHandlerSuite) TestOnNamespaceStateChange_CancelsPollsOfSoftDele
 				s.NoError(pollCtx.Err())
 			}
 			s.NoError(otherPollCtx.Err())
+		})
+	}
+}
+
+func TestNexusRetryableTrailerInterceptor(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name       string
+		fullMethod string
+		err        error
+		expected   []string
+	}{
+		{
+			name:     "RetryableByType",
+			err:      commonnexus.HandlerErrorToServiceError(nexus.NewHandlerErrorf(nexus.HandlerErrorTypeRequestTimeout, "timeout")),
+			expected: []string{"true"},
+		},
+		{
+			name:     "NonRetryableByType",
+			err:      commonnexus.HandlerErrorToServiceError(nexus.NewHandlerErrorf(nexus.HandlerErrorTypeBadRequest, "bad")),
+			expected: []string{"false"},
+		},
+		{
+			name: "NonRetryableByBehavior",
+			err: commonnexus.HandlerErrorToServiceError(&nexus.HandlerError{
+				Type:          nexus.HandlerErrorTypeInternal,
+				Message:       "internal",
+				RetryBehavior: nexus.HandlerErrorRetryBehaviorNonRetryable,
+			}),
+			expected: []string{"false"},
+		},
+		{
+			name:       "Cancel",
+			fullMethod: workflowservice.WorkflowService_CancelNexusOperation_FullMethodName,
+			err:        commonnexus.HandlerErrorToServiceError(nexus.NewHandlerErrorf(nexus.HandlerErrorTypeBadRequest, "bad")),
+			expected:   []string{"false"},
+		},
+		{
+			name:       "OtherMethod",
+			fullMethod: workflowservice.WorkflowService_StartWorkflowExecution_FullMethodName,
+			err:        commonnexus.HandlerErrorToServiceError(nexus.NewHandlerErrorf(nexus.HandlerErrorTypeBadRequest, "bad")),
+		},
+		{
+			name: "NotAHandlerError",
+			err:  errors.New("other"),
+		},
+		{
+			name: "NoError",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			fullMethod := tc.fullMethod
+			if fullMethod == "" {
+				fullMethod = workflowservice.WorkflowService_StartNexusOperation_FullMethodName
+			}
+			stream := rpctest.NewMockServerTransportStream(fullMethod)
+			ctx := grpc.NewContextWithServerTransportStream(context.Background(), stream)
+
+			_, err := NexusRetryableTrailerInterceptor(
+				ctx,
+				nil,
+				&grpc.UnaryServerInfo{FullMethod: fullMethod},
+				func(context.Context, any) (any, error) { return nil, tc.err },
+			)
+			require.Equal(t, tc.err, err)
+
+			var values []string
+			for _, md := range stream.CapturedTrailers() {
+				values = append(values, md.Get(commonnexus.RetryableTrailerName)...)
+			}
+			require.Equal(t, tc.expected, values)
 		})
 	}
 }
